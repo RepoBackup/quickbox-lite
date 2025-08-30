@@ -182,7 +182,7 @@ function _main() {
 		_warning "The system requires a reboot!"
 		_success "${APP_TITLE} installation finished."
 	else
-		_execute "sysctl -p"
+		_execute "systemctl restart systemd-sysctl"
 		_success "${APP_TITLE} started."
 	fi
 }
