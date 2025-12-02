@@ -4,7 +4,7 @@
   "scripts": {
     "lint": "eslint ./inc ./js",
     "audit": "npm audit --registry=https://registry.npmjs.org",
-    "upgrade": "npx npm-check -u"
+    "upgrade": "npx npm-check-updates -i"
   },
   "author": "quickbox-lite",
   "license": "GPL-3.0-or-later",
@@ -28,12 +28,12 @@
     "visibilityjs": "^2.0.2"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.2.0",
-    "@eslint/js": "^9.17.0",
-    "eslint": "^9.17.0",
-    "eslint-plugin-import": "^2.31.0",
-    "eslint-plugin-n": "^17.15.0",
+    "@eslint/eslintrc": "^3.3.3",
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-n": "^17.23.1",
     "eslint-plugin-promise": "^7.2.1",
-    "globals": "^15.13.0"
+    "globals": "^16.5.0"
   }
 }

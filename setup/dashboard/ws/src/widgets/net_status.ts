@@ -3,10 +3,7 @@ import si from "systeminformation";
 
 async function enuminterface() {
     const interfaces = await si.networkInterfaces();
-    if (Array.isArray(interfaces)) {
-        return interfaces.filter(i => i.operstate === "up").map(i => i.iface);
-    }
-    return [interfaces.iface];
+    return interfaces.filter(i => i.operstate === "up").map(i => i.iface);
 }
 
 export const netStatus = async () => {

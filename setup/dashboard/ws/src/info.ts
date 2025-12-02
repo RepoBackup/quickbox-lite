@@ -42,7 +42,7 @@ for (const pkg of pkgList as Service[]) {
             }
         }
     }
-    const packageName = pkg.package.toString();
+    const packageName = pkg.package;
     if (packageName in packageMap) {
         console.error(`package '${packageName}' duplicated in package list!`);
     }

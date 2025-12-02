@@ -7,7 +7,7 @@ $rules = [
      */
     '@Symfony' => true,
     '@Symfony:risky' => true,
-    '@PHP74Migration' => true,
+    '@PHP7x4Migration' => true,
     /**
      * Rules
      */

@@ -4,22 +4,21 @@ import globals from "globals";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import tseslint from "typescript-eslint";
+import { defineConfig } from "eslint/config";
 import eslint from "@eslint/js";
-import stylisticJs from "@stylistic/eslint-plugin-js";
-import stylisticTs from "@stylistic/eslint-plugin-ts";
+import tseslint from "typescript-eslint";
+import stylistic from "@stylistic/eslint-plugin";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export default tseslint.config(
+export default defineConfig(
   {
     ignores: ["**/build", "**/dist", "**/*.js", "**/*.mjs", "src/libs/i18n/**/*.ts"],
   },
   {
     plugins: {
-      "@stylistic": stylisticJs,
-      "@stylistic/ts": stylisticTs,
+      "@stylistic": stylistic,
     },
   },
   eslint.configs.recommended,
@@ -57,7 +56,7 @@ export default tseslint.config(
         },
       ],
       "@stylistic/semi": ["error", "always"],
-      "@stylistic/ts/member-delimiter-style": [
+      "@stylistic/member-delimiter-style": [
         "error",
         {
           multiline: {
@@ -71,7 +70,7 @@ export default tseslint.config(
           },
         },
       ],
-      "@stylistic/ts/type-annotation-spacing": "error",
+      "@stylistic/type-annotation-spacing": "error",
 
       "@typescript-eslint/member-ordering": "error",
       "@typescript-eslint/no-empty-function": "error",

@@ -10,7 +10,7 @@ export function formatSize(length: number) {
     const value = isNaN(length) ? 0 : length;
     const suffixList = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
     const idx = Math.min(Math.max(Math.floor(Math.log2(value) / 10), 0), suffixList.length - 1);
-    return (value / Math.pow(2, idx * 10)).toFixed(idx > 0 ? 2 : 0).toString() + " " + suffixList[idx];
+    return (value / Math.pow(2, idx * 10)).toFixed(idx > 0 ? 2 : 0) + " " + suffixList[idx];
 }
 
 export function formatSpeed(length: number, decimals = 3, startWith = 0) {
