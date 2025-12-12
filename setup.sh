@@ -753,7 +753,7 @@ function _dependency() {
 	_addPHP
 	DEPLIST="sudo at bc build-essential curl wget nginx-extras subversion ssl-cert php7.4-cli php7.4-fpm php7.4 php7.4-dev php7.4-memcached memcached php7.4-curl php7.4-gd php7.4-geoip php7.4-json php7.4-mbstring php7.4-opcache php7.4-xml php7.4-xmlrpc php7.4-zip libfcgi0ldbl mcrypt libmcrypt-dev nano unzip htop iotop vnstat vnstati automake make openssl net-tools debconf-utils ntp rsync screenfetch"
 	if [[ "$CODENAME" =~ ("trixie") ]]; then
-		DEPLIST=$(echo $DEPLIST | sed 's/\bntp\b//g')
+		DEPLIST=${DEPLIST//ntp/}
 	fi
 	for depend in $DEPLIST; do
 		# shellcheck disable=SC2154
