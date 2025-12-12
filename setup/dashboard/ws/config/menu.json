@@ -84,6 +84,12 @@
         "url": "/web/",
         "logo": "img/brands/plex.png"
     }, {
+        "name": "PeerBanHelper",
+        "service": true,
+        "ref": "peerbanhelper",
+        "url": "/pbh/",
+        "logo": "img/brands/peerbanhelper.png"
+    }, {
         "name": "Rclone",
         "service": true,
         "ref": "rclone",

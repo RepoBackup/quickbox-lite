@@ -138,11 +138,14 @@ function _chPasswd() {
 	_success "User info updated"
 
 	# Update application password
+	if [[ -f /install/.samba.lock ]]; then
+		printf "${password}\n${password}\n" | smbpasswd -s ${username} >>"${OUTTO}"
+	fi
 	if [[ -f /install/.deluge.lock ]]; then
 		_execute "systemctl stop deluged@${username}"
 		_execute "systemctl stop deluge-web@${username}"
 		DWSALT=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
-		DWP=$(python2 /usr/local/bin/quickbox/system/auxiliary/deluge.Userpass.py ${password} ${DWSALT})
+		DWP=$(python3 /usr/local/bin/quickbox/system/auxiliary/deluge.Userpass.py ${password} ${DWSALT})
 		sed -i "s/.*$username.*/${username}:${password}:10/" /home/$username/.config/deluge/auth
 		sed -i "s/.*pwd_salt.*/  \"pwd_salt\": \"${DWSALT}\",/" /home/$username/.config/deluge/web.conf
 		sed -i "s/.*pwd_sha1.*/  \"pwd_sha1\": \"${DWP}\",/" /home/$username/.config/deluge/web.conf
@@ -217,6 +220,13 @@ EOF
 		sed -i "s/.*rpc-password.*/    \"rpc-password\": \"${password}\",/" /home/${username}/.config/transmission/settings.json
 		_execute "systemctl start transmission@${username}"
 		_success "Transmission password updated"
+	fi
+	if [[ -f /install/.${username}.sabnzbd.lock ]]; then
+		_execute "systemctl stop sabnzbd@${username}"
+		encpass=$(sed -e 's/[&\\/]/\\&/g; s/\$/\\$/g; s/@/\\@/g;' <<<"$password")
+		sed -i "s/password = \".*\"/password = \"${encpass}\"/g" /home/${username}/.sabnzbd/sabnzbd.ini
+		_execute "systemctl start sabnzbd@${username}"
+		_success "sabnzbd password updated"
 	fi
 }
 

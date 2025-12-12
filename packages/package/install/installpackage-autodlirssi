@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -80,7 +80,7 @@ APP_LOCK=.$APP_NAME.lock
 OUTTO=/srv/dashboard/db/output.log
 
 APPSRC="http://git.io/vlcND"
-PLUGINSRC="https://github.com/autodl-community/autodl-rutorrent.git"
+PLUGINSRC="https://github.com/amefs/autodl-rutorrent.git"
 ################################################################################
 # SCRIPT FUNCTIONS
 ################################################################################
@@ -214,12 +214,7 @@ ADLC
 			_execute "git clone ${PLUGINSRC} autodl-irssi"
 			_execute "chown -R www-data:www-data autodl-irssi/"
 		fi
-		# apply patch https://github.com/autodl-community/autodl-rutorrent/pull/58
-		cd /tmp || exit 1
-		curl -L https://patch-diff.githubusercontent.com/raw/autodl-community/autodl-rutorrent/pull/58.patch -o 58.patch  >>"${OUTTO}" 2>&1
-		patch -p 1 -d /srv/rutorrent/plugins/autodl-irssi < /tmp/58.patch >>"${OUTTO}" 2>&1
-		rm -f 58.patch
-
+		
 		userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
 		for username in $userlist; do
 			AUTODLPASSWORD=$(cat /home/${username}/.autodl/autodl.cfg | grep password | cut -d= -f2 | sed 's/ //g')

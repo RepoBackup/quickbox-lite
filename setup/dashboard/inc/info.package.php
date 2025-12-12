@@ -271,12 +271,26 @@ $packageList = [
         'description' => 'OPENVPN',
         'lockfile'    => "/install/.{$username}.openvpn.lock",
         'uninstall'   => 'UNINSTALL_OPENVPN_TXT',
-        'boxonly'     => false,
+        'boxonly'     => true,
         'services'    => [
             'openvpn' => [
                 'process'  => 'openvpn',
                 'name'     => 'OpenVPN',
                 'username' => 'nobody',
+            ],
+        ],
+    ], [
+        'package'     => 'pbh',
+        'name'        => 'PeerBanHelper',
+        'description' => 'PBH',
+        'lockfile'    => "/install/.{$username}.peerbanhelper.lock",
+        'uninstall'   => 'UNINSTALL_PBH_TXT',
+        'boxonly'     => false,
+        'services'    => [
+            'peerbanhelper' => [
+                'process'  => 'PeerBanHelper',
+                'name'     => 'PeerBanHelper',
+                'username' => $username,
             ],
         ],
     ], [
@@ -571,6 +585,12 @@ $menuList = [
         'ref'     => getPackage('novnc'),
         'url'     => '/vnc/',
         'logo'    => 'img/brands/novnc.png',
+    ], [
+        'name'    => 'PeerBanHelper',
+        'service' => true,
+        'ref'     => getPackage('pbh'),
+        'url'     => '/pbh/',
+        'logo'    => 'img/brands/peerbanhelper.png',
     ], [
         'name'    => 'Plex',
         'service' => true,

@@ -5,7 +5,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -76,7 +76,7 @@ APP_NAME="transmission"
 APP_SERVICE="transmission"
 APP_BASEDEPS="transmission-daemon transmission-cli transmission-common"
 
-version=3
+version=4
 alt_webui=2
 ui_only=0
 
@@ -257,6 +257,10 @@ function _download() {
 
 function _updateApp() {
 	_info "Updating ${APP_TITLE}..."
+	# debian trixie only have transmission 4.0.6
+	if [[ "$CODENAME" =~ ("trixie") ]]; then
+		version=4
+	fi
 	# get deb packages
 	PACKAGE="transmission"
 	_execute "apt-mark unhold transmission-cli"

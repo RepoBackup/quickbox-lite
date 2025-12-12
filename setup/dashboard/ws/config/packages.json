@@ -241,12 +241,26 @@
         "description" : "OPENVPN",
         "lockfile"    : "/install/.$username$.openvpn.lock",
         "uninstall"   : "UNINSTALL_OPENVPN_TXT",
-        "boxonly"     : false,
+        "boxonly"     : true,
         "services"    : {
             "openvpn" : {
                 "process"  : "openvpn",
                 "name"     : "OpenVPN",
                 "username" : "nobody"
+            }
+        }
+    }, {
+        "package"     : "pbh",
+        "name"        : "PeerBanHelper",
+        "description" : "PBH",
+        "lockfile"    : "/install/.$username$.peerbanhelper.lock",
+        "uninstall"   : "UNINSTALL_PBH_TXT",
+        "boxonly"     : false,
+        "services"    : {
+            "peerbanhelper" : {
+                "process"  : "PeerBanHelper",
+                "name"     : "PeerBanHelper",
+                "username" : "$username$"
             }
         }
     }, {

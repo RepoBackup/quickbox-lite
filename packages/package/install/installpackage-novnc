@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Maintainer:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # Author:           Mischief
 # Credits to:       QuickBox.io
 #
@@ -128,8 +128,10 @@ Please wait until the process is completed
 function _installAddSources() {
 	_info "Adding additional keys and sources ${APP_TITLE}..."
 	if [[ $DISTRO == "Ubuntu" ]]; then
-		apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0x0AB215679C571D1C8325275B9BDB3D89CE49EC21 >/dev/null 2>&1
-		add-apt-repository ppa:mozillateam/ppa -y >/dev/null 2>&1
+		wget -qO- "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x738BEB9321D1AAEC13EA9391AEBDF4819BE21867" | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/mozilla.gpg >>"${OUTTO}" 2>&1
+		cat >/etc/apt/sources.list.d/firefox.list <<DFF
+deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/mozilla.gpg] https://ppa.launchpadcontent.net/mozillateam/ppa/ubuntu $(lsb_release -sc) main
+DFF
 	fi
 	_success "Keys and sources added."
 }

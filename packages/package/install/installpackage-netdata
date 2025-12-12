@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Maintainer:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # Author:           Mischief
 # Credits to:       QuickBox.io
 #
@@ -162,18 +162,9 @@ function _installDepends() {
 }
 
 function _installApp() {
-	_info "Building ${APP_TITLE}..."
-	#bash <(curl -Ss https://my-netdata.io/kickstart.sh) --non-interactive >> "${OUTTO}" 2>&1;
-	username=$(cat /root/.admin.info | cut -d: -f1)
-	mkdir -p /home/${username}/.config/ >/dev/null 2>&1
-	cd /home/${username}/.config/
-	_execute "git clone --recurse-submodules ${BRANCH} --depth=100 netdata"
-	cd netdata || { _error "Download Netdata failed..." && exit 1; }
-	latest_release_version=$(curl -s https://api.github.com/repos/netdata/netdata/releases/latest | jq -r ".tag_name")
-	_execute "git checkout $latest_release_version"
-	./netdata-installer.sh --disable-telemetry --dont-start-it --dont-wait >>"${OUTTO}" 2>&1
-	sleep 3
-	_success "${APP_TITLE} Built."
+	_info "Installing ${APP_TITLE}..."
+	bash <(curl -Ss https://get.netdata.cloud/kickstart.sh) --non-interactive --no-updates --stable-channel --disable-telemetry >> "${OUTTO}" 2>&1;
+	_success "${APP_TITLE} Installed."
 }
 
 function _configureApp() {
@@ -257,7 +248,6 @@ _lockCheck
 _setLock
 _installInfo
 _installSystemUpdates
-_installDepends
 _installApp
 _configureApp
 _installAppLock

@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -75,7 +75,7 @@ APP_SERVICE="rtorrent"
 
 APP_LOCK=.$APP_NAME.lock
 OUTTO=/srv/dashboard/db/output.log
-version=0.9.6
+version=0.9.8
 cdn=$(cat /install/.cdn.lock)
 
 ################################################################################
@@ -241,12 +241,16 @@ function _updateApp() {
 	_execute "apt-mark unhold libtorrent19"
 	_execute "apt-mark unhold libtorrent20"
 	_execute "apt-mark unhold libtorrent21"
+	_execute "apt-mark unhold libtorrent27"
+	_execute "apt-mark unhold libtorrent27t64"	
 	_info "Uninstalling old ${APP_TITLE}..."
 	_execute "apt-get -y purge rtorrent"
 	_execute "apt-get -y purge libtorrent18"
 	_execute "apt-get -y purge libtorrent19"
 	_execute "apt-get -y purge libtorrent20"
 	_execute "apt-get -y purge libtorrent21"
+	_execute "apt-get -y purge libtorrent27"
+	_execute "apt-get -y purge libtorrent27t64"	
 	_execute "apt-get -y purge libtorrent-rakshasa"
 	_execute "apt-get -y autoremove"
 	_execute "apt-get -y autoclean"
@@ -259,6 +263,14 @@ function _updateApp() {
 	feature-bind)
 		RTVERSION=feature-bind
 		LTORRENT=feature-bind
+		;;
+	0.15.7)
+		RTORRENTBIN=rtorrent_0.15.7-1build1_amd64.deb
+		if [[ "$CODENAME" =~ "trixie" ]]; then
+			LTORRENTBIN=libtorrent27t64_0.15.7-1build1_amd64.deb
+		else
+			LTORRENTBIN=libtorrent21_0.15.7-1build1_amd64.deb
+		fi
 		;;
 	0.9.8)
 		RTORRENTBIN=rtorrent_0.9.8-1build1_amd64.deb
@@ -273,7 +285,7 @@ function _updateApp() {
 		LTORRENTBIN=libtorrent19_0.13.6-1build1_amd64.deb
 		;;
 	0.9.4)
-		if [[ "$CODENAME" =~ ("bullseye"|"bookworm") ]]; then
+		if [[ "$CODENAME" =~ ("bullseye"|"bookworm"|"trixie") ]]; then
 			RTORRENTBIN=rtorrent_0.9.6-1build1_amd64.deb
 			LTORRENTBIN=libtorrent19_0.13.6-1build1_amd64.deb
 		else
@@ -349,9 +361,17 @@ function _updateApp() {
 		_execute "apt-mark hold libtorrent19"
 		_execute "apt-mark hold libtorrent20"
 		_execute "apt-mark hold libtorrent21"
+		_execute "apt-mark hold libtorrent27"
+		_execute "apt-mark hold libtorrent27t64"
 	fi
 	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
 	for username in $userlist; do
+		if ! grep -q "network.rpc.use_xmlrpc.set = true" /home/${username}/.rtorrent.rc; then
+			echo "network.rpc.use_xmlrpc.set = true" >> /home/${username}/.rtorrent.rc
+		fi
+		if ! grep -q "network.rpc.use_jsonrpc.set = true" /home/${username}/.rtorrent.rc; then
+			echo "network.rpc.use_jsonrpc.set = true" >> /home/${username}/.rtorrent.rc
+		fi
 		_execute "systemctl start ${APP_SERVICE}@${username}"
 	done
 	_success "${APP_TITLE} is now update to date."

@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -78,7 +78,7 @@ APP_BASEDEPS="transmission-daemon transmission-cli transmission-common"
 # RANDOM PORT
 APP_WEB_PORT_LOW="15101"
 APP_WEB_PORT_HIGH="15150"
-version=3
+version=4
 alt_webui=2
 
 APP_LOCK=$(echo .$APP_NAME.lock)
@@ -141,7 +141,11 @@ Please wait until the process is completed
 function _installAddSources() {
 	_info "Adding additional keys and sources ${APP_TITLE}..."
 	if [[ $DISTRO == Ubuntu ]]; then
-		sudo add-apt-repository -y ppa:transmissionbt/ppa >/dev/null 2>&1
+		gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 0x0E85507B6CC37DA238D16C52D9F0E442C9C05DDD >>"${OUTTO}" 2>&1
+		gpg --export --armor 0x0E85507B6CC37DA238D16C52D9F0E442C9C05DDD | sudo tee /etc/apt/trusted.gpg.d/transmission.gpg >>"${OUTTO}" 2>&1
+		cat >/etc/apt/sources.list.d/transmission.list <<DTR
+deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/transmission.gpg] https://ppa.launchpadcontent.net/transmissionbt/ppa/ubuntu $(lsb_release -sc) main
+DTR
 	fi
 	_success "Keys and sources added."
 }
@@ -292,6 +296,10 @@ function _installApp() {
 	if [[ ${ppa} == 1 ]]; then
 		_installDepends
 	else
+		# debian trixie only have transmission 4.0.6
+		if [[ "$CODENAME" =~ ("trixie") ]]; then
+			version=4
+		fi
 		# get deb packages
 		PACKAGE="transmission"
 		cd /tmp || exit 1

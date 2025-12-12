@@ -90,6 +90,11 @@
     id: "#appstat_openvpn",
     time: 5000
   }, {
+    key: "PBH",
+    url: "/widgets/service_status.php?service=peerbanhelper",
+    id: "#appstat_peerbanhelper",
+    time: 5000
+  }, {
     key: "PLEX",
     url: "/widgets/service_status.php?service=plexmediaserver",
     id: "#appstat_plexmediaserver",

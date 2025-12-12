@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# [QuickBox Lite File Browser Remover]
+# [QuickBox Lite PeerBanHelper Updater]
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
@@ -12,6 +12,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 #################################################################################
+#################################################################################
+# CORE VARIABLE
+#################################################################################
+CODENAME=$(lsb_release -cs)
+
 ################################################################################
 # HELP FUNCTIONS
 ################################################################################
@@ -61,24 +66,28 @@ function _error() {
 	printf ">> Error: %s\n" "$@" >>"${OUTTO}"
 }
 
+function _version_gt() { test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"; }
 #################################################################################
 # APP VARIABLE
 #################################################################################
-APP_TITLE="File Browser"
-APP_NAME="filebrowser"
-APP_SERVICE="filebrowser"
+APP_TITLE="PeerBanHelper"
+APP_NAME="peerbanhelper"
+APP_SERVICE="peerbanhelper"
+APP_BASEDEPS=""
+APP_HOST="127.0.0.1"
 
-APP_LOCK=.$APP_NAME.lock
 OUTTO=/srv/dashboard/db/output.log
+username=$(cat /root/.admin.info | cut -d: -f1)
 
 ################################################################################
 # SCRIPT FUNCTIONS
 ################################################################################
 function _usage() {
-	echo -e "\nQuickBox Lite $APP_TITLE Remover"
-	echo -e "\nUsage: \n$(basename "$0") [-h] [-l logfile]"
+	echo -e "\nQuickBox Lite $APP_TITLE Updater"
+	echo -e "\nUsage: \n$(basename "$0") [-h] [-l logfile] [-u username]"
 	echo -e "\nOptions:\n"
 	echo "-l, --log <logfile>       specific log file"
+	echo "-u, --user <username>     the user for this updater"
 	echo ""
 	echo "-h, --help                display this help and exit"
 }
@@ -93,7 +102,7 @@ function _lockCheck() {
 		_error "Exiting..."
 		exit 1
 	fi
-	if [[ ! -f "/install/$APP_LOCK" ]]; then
+	if [[ ! -f "/install/.${username}.${APP_NAME}.lock" ]]; then
 		_error "${APP_TITLE} haven't installed ..."
 		exit 1
 	fi
@@ -105,64 +114,68 @@ function _lockCleanup() {
 	rm -f /install/.install.lock
 }
 
-function _removeInfo() {
+function _updateInfo() {
 	_print "
-$APP_TITLE will now be removed.
+$APP_TITLE will now be updated.
 
 This process may take a few minutes
 Please wait until the process is completed
 "
 }
 
-function _removeService() {
-	_info "Removing ${APP_TITLE} service..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		_execute "systemctl disable ${APP_SERVICE}@${username}"
-		_execute "systemctl stop ${APP_SERVICE}@${username}"
-	done
-	rm -rf /etc/systemd/system/${APP_SERVICE}@.service >/dev/null 2>&1
-	_execute "systemctl daemon-reload"
-	_success "${APP_TITLE} service removed."
-}
-
-function _removeDepends() {
-	_info "Removing ${APP_TITLE} dependencies..."
-	local DEPLIST="${APP_BASEDEPS}"
-	for depend in $DEPLIST; do
-		_info "Removing ${depend}... "
-		_execute "apt-get -y purge ${depend}"
-		_execute "apt-get -y autoremove"
-		_execute "apt-get -y autoclean"
-	done
-	_success "${APP_TITLE} dependencies removed."
-}
-
-function _removeApp() {
-	_info "Removing ${APP_TITLE}..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		rm -rf /home/${username}/.config/filebrowser/
-		rm -f /etc/nginx/conf.d/${username}.filebrowser.conf
-		rm -f /install/${username}.${APP_NAME}.port >/dev/null 2>&1
-	done
-	if [ ! -f /install/.filebrowser-ee.lock ]; then
-		rm -f /usr/local/bin/filebrowser >/dev/null 2>&1
+function _installSystemUpdates() {
+	_info "Checking and performing updates to system... "
+	DEBIAN_FRONTEND=noninteractive apt-get -yqq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" update >/dev/null 2>&1
+	DEBIAN_FRONTEND=noninteractive apt-get -yqq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" upgrade >/dev/null 2>&1
+	## auto solve lock
+	if [ "$?" -eq 2 ]; then
+		_warning "dpkg database is locked."
+		_info "fixing dpkg lock..."
+		rm -f /var/lib/dpkg/updates/0*
+		locks=$(find /var/lib/dpkg/lock* && find /var/cache/apt/archives/lock*)
+		if [[ ${locks} == $(find /var/lib/dpkg/lock* && find /var/cache/apt/archives/lock*) ]]; then
+			for l in ${locks}; do
+				rm -rf ${l}
+			done
+			_execute "dpkg --configure -a"
+			DEBIAN_FRONTEND=noninteractive apt-get -yqq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" update >/dev/null 2>&1
+			DEBIAN_FRONTEND=noninteractive apt-get -yqq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" upgrade >/dev/null 2>&1
+		fi
+		if ! (apt-get check >/dev/null); then
+			apt-get install -f >>"${OUTTO}" 2>&1
+			if ! (apt-get check >/dev/null); then
+				whiptail --title "$ERROR_TITLE_INSTALL" --msgbox "$ERROR_TEXT_INSTALL_1" --ok-button "$BUTTON_OK" 8 72
+				exit 1
+			fi
+		fi
 	fi
-	rm -f /etc/nginx/apps/filebrowser.conf >/dev/null 2>&1
-	_success "${APP_TITLE} removed."
+	_success "System updated."
 }
 
-function _removeAppLock() {
-	_info "Removing ${APP_TITLE} lock..."
-	rm -f /install/${APP_LOCK}
-	_success "${APP_TITLE} lock removed."
+function _updateApp() {
+	_info "Stop old ${APP_TITLE}..."
+	_execute "systemctl stop ${APP_SERVICE}@${username}"
+	_info "Installing ${APP_TITLE}..."
+	cd /home/${username}/.config/peerbanhelper/ || exit 1
+	local latest_tag=$(curl -s https://api.github.com/repos/PBH-BTN/PeerBanHelper/releases/latest | jq -r ".tag_name") >>"${OUTTO}" 2>&1
+	_UID=$(id -u ${username})
+	_GID=$(id -g ${username})
+	sed -i "s|\(image: ghostchu/peerbanhelper:\).*|\1${latest_tag}|" /home/${username}/.config/peerbanhelper/docker-compose.yml 
+	cd /home/${username}/.config/peerbanhelper/ || exit 1
+	_execute "docker compose pull"
+	_success "${APP_TITLE} Installed."
+}
+
+function _reconfigureApp() {
+	_info "Configuring ${APP_TITLE}..."
+	_execute "systemctl start ${APP_SERVICE}@${username}"
+	_success "${APP_TITLE} configured."
 }
 
 #################################################################################
 # OPT GENERATOR
 #################################################################################
-if ! ARGS=$(getopt -a -o hl: -l help,log: -- "$@")
+if ! ARGS=$(getopt -a -o hl:u: -l help,log:,user: -- "$@")
 then
     _usage
     exit 1
@@ -178,6 +191,10 @@ while true; do
 		OUTTO="$2"
 		shift
 		;;
+	-u | --user)
+		username="$2"
+		shift
+		;;
 	--)
 		shift
 		break
@@ -191,8 +208,7 @@ done
 #################################################################################
 _lockCheck
 _setLock
-_removeInfo
-_removeService
-_removeApp
-_removeAppLock
+_updateInfo
+_updateApp
+_reconfigureApp
 _lockCleanup

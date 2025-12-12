@@ -1,3 +1,36 @@
+## CHANGELOG v1.5.12
+
+*Changelog update Thirsday, Dec 11, 2025*
+
+### General additions
+
+- Support Debian 13
+- Peerbanhelper available
+
+### Important changes
+
+- Install Transmission 4.0.6 by default
+
+### Function improved
+
+- Use Static build for all qBitTorrent version
+- rTorrent 0.15.7 available
+- support syncthing 2 stable
+
+### Function updated
+
+- move ssh config to config.d
+- use systemd-sysctl instead of execute `sysctl -p`
+- use qdisc in bbr
+- update resilio sync config
+- quickbox backend dependency (by Tautcony)
+
+### Bug fixed
+
+- Fix broken autodlirssi WebUI
+
+---
+
 ## CHANGELOG v1.5.11
 
 *Changelog update Friday, Jan 10, 2025*

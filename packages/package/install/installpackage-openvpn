@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -195,6 +195,8 @@ function _installApp() {
 	export COMPRESSION_ENABLED=n
 	export CUSTOMIZE_ENC=n
 	export CLIENT=${username}
+	export CLIENT_CERT_DURATION_DAYS=3650
+	export MULTI_CLIENT=n
 	export PASS=1
 	/tmp/openvpn-install.sh >>"${OUTTO}" 2>&1
 	_success "${APP_TITLE} Built."

@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Maintainer:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # Author:           Mischief
 # Credits to:       QuickBox.io
 #
@@ -135,7 +135,11 @@ function _removeDepends() {
 function _removeApp() {
 	_info "Removing ${APP_TITLE}..."
 	username=$(cat /root/.admin.info | cut -d: -f1)
-	_execute "source /usr/libexec/netdata/netdata-uninstaller.sh --yes --force"
+	if [[ -f /usr/libexec/netdata/netdata-uninstaller.sh ]]; then
+		_execute "source /usr/libexec/netdata/netdata-uninstaller.sh --yes --force"
+	else
+		_execute "apt-get -y purge netdata*"
+	fi
 	_execute "apt-get autoremove -y"
 	_execute "apt-get autoclean -y"
 	userdel netdata >/dev/null 2>&1

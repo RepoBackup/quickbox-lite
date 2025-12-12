@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.11
+# Current version:  v1.5.12
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -142,7 +142,7 @@ function _removeApp() {
 
 	# headless remove
 	export APPROVE_INSTALL=y
-	export MENU_OPTION="3"
+	export MENU_OPTION="4"
 	/tmp/openvpn-install.sh <<< y >>"${OUTTO}" 2>&1
 
 	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
