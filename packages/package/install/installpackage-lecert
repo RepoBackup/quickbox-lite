@@ -71,7 +71,7 @@ APP_BASEDEPS="socat"
 APP_LOCK=.$APP_NAME.lock
 OUTTO=/srv/dashboard/db/output.log
 domain=""
-letsencrypt=0
+letsencrypt=1
 
 ################################################################################
 # SCRIPT FUNCTIONS
