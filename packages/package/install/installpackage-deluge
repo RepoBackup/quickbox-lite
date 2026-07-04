@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.12
+# Current version:  v1.6.0
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -584,7 +584,7 @@ function _installDeluge() {
 		_info "Installing python3-twisted[tls]... "
 		_execute "pip3 install --upgrade twisted[tls]"
 		_info "Installing pyOpenSSL... "
-		_execute "pip3 install --upgrade --force-reinstall pyOpenSSL"
+		_execute "pip3 install --upgrade --force-reinstall pyOpenSSL<25.0.0"
 		_info "Installing attrs... "
 		_execute "pip3 install --upgrade --force-reinstall attrs"
 		_success "${APP_TITLE} dependencies installed."
@@ -1043,7 +1043,7 @@ location /deluge/ {
   auth_basic "Password Required";
   auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
   proxy_set_header X-Deluge-Base "/deluge/";
-  rewrite ^/deluge/(.*) /$1 break;
+  rewrite ^/deluge/(?P<path>.*) /$path break;
   proxy_pass http://$remote_user.deluge;
 }
 DRP

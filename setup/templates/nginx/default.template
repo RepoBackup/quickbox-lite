@@ -34,13 +34,6 @@ server {
     rewrite "^" $scheme://$host$uri permanent;
     }
 
-    location ~ \.php$
-    {
-      fastcgi_read_timeout 240;
-      fastcgi_pass  unix:/run/php/php7.4-fpm.sock;
-      include snippets/fastcgi-php.conf;
-      fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-    }
     include /etc/nginx/apps/*.conf;
 
     location ~ /\.ht {

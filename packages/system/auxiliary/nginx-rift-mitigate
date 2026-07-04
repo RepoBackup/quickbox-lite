@@ -1,0 +1,261 @@
+#!/bin/bash
+#
+# NGINX Rift (CVE-2026-42945) mitigation helper
+# Converts unnamed PCRE capture groups in rewrite directives to named captures.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+show_help() {
+  cat <<'EOF'
+Usage:
+  nginx-rift-mitigate [--dry-run] [--no-nginx-test] [target ...]
+
+Description:
+  Scans nginx configuration files and rewrites unnamed PCRE captures in rewrite
+  directives from numeric captures (e.g. (.*), $1) to named captures
+  (e.g. (?<cap1>.*), $cap1).
+
+Options:
+  --dry-run        Show files that would change but do not modify files.
+  --no-nginx-test  Skip final 'nginx -t' validation.
+  -h, --help       Show this help.
+
+Default targets:
+  /etc/nginx/nginx.conf
+  /etc/nginx/conf.d
+  /etc/nginx/sites-enabled
+  /etc/nginx/apps
+  /etc/nginx/snippets
+
+Examples:
+  nginx-rift-mitigate
+  nginx-rift-mitigate --dry-run
+  nginx-rift-mitigate /etc/nginx/apps /etc/nginx/conf.d/custom.conf
+EOF
+}
+
+DRY_RUN=0
+RUN_NGINX_TEST=1
+
+TARGETS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      ;;
+    --no-nginx-test)
+      RUN_NGINX_TEST=0
+      ;;
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    *)
+      TARGETS+=("$1")
+      ;;
+  esac
+  shift
+done
+
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+  TARGETS=(
+    /etc/nginx/nginx.conf
+    /etc/nginx/conf.d
+    /etc/nginx/sites-enabled
+    /etc/nginx/apps
+    /etc/nginx/snippets
+  )
+fi
+
+if [[ $DRY_RUN -eq 0 && $EUID -ne 0 ]]; then
+  echo "ERROR: run as root (or use --dry-run)." >&2
+  exit 1
+fi
+
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="/var/backups/nginx-rift-mitigate-${TIMESTAMP}"
+
+FILES=()
+for target in "${TARGETS[@]}"; do
+  if [[ -f "$target" ]]; then
+    FILES+=("$target")
+  elif [[ -d "$target" ]]; then
+    while IFS= read -r -d '' found; do
+      FILES+=("$found")
+    done < <(find "$target" -type f -print0)
+  else
+    echo "WARN: target not found, skipping: $target" >&2
+  fi
+done
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "No files found to scan."
+  exit 0
+fi
+
+# De-duplicate file list.
+if command -v awk >/dev/null 2>&1; then
+  mapfile -t FILES < <(printf '%s\n' "${FILES[@]}" | awk '!seen[$0]++')
+fi
+
+scan_rewrite_line() {
+  local file="$1"
+  # Fast pre-filter so we only process likely candidates.
+  grep -Eq '^[[:space:]]*rewrite[[:space:]]+' "$file" 2>/dev/null
+}
+
+apply_transform() {
+  local file="$1"
+  perl - "$file" <<'PERL'
+use strict;
+use warnings;
+
+my $file = shift @ARGV;
+open my $in, '<', $file or die "open($file) failed: $!\n";
+my @out;
+
+while (my $line = <$in>) {
+  if ($line =~ /^(\s*rewrite\s+)(\S+)(\s+)(\S+)(\s*(?:last|break|redirect|permanent)?\s*;.*?)(\r?\n?)$/) {
+    my ($prefix, $regex, $space, $replacement, $suffix, $eol) = ($1, $2, $3, $4, $5, $6);
+
+    my $regex_new = '';
+    my $cap_index = 0;
+    my $escaped = 0;
+    my $in_class = 0;
+
+    for (my $i = 0; $i < length($regex); $i++) {
+      my $ch = substr($regex, $i, 1);
+
+      if ($escaped) {
+        $regex_new .= $ch;
+        $escaped = 0;
+        next;
+      }
+
+      if ($ch eq '\\') {
+        $regex_new .= $ch;
+        $escaped = 1;
+        next;
+      }
+
+      if ($ch eq '[') {
+        $in_class = 1;
+        $regex_new .= $ch;
+        next;
+      }
+
+      if ($ch eq ']' && $in_class) {
+        $in_class = 0;
+        $regex_new .= $ch;
+        next;
+      }
+
+      if (!$in_class && $ch eq '(') {
+        my $next = substr($regex, $i + 1, 1);
+        if ($next ne '?') {
+          $cap_index++;
+          my $capname = $cap_index == 1 ? 'path' : "path${cap_index}";
+          $regex_new .= "(?P<${capname}>";
+          next;
+        }
+      }
+
+      $regex_new .= $ch;
+    }
+
+    if ($cap_index > 0) {
+      for (my $i = $cap_index; $i >= 1; $i--) {
+        my $name = $i == 1 ? 'path' : "path${i}";
+        $replacement =~ s/\$$i/\$$name/g;
+      }
+      $line = $prefix . $regex_new . $space . $replacement . $suffix . $eol;
+    }
+  }
+
+  push @out, $line;
+}
+
+close $in;
+open my $out, '>', $file or die "write($file) failed: $!\n";
+print {$out} @out;
+close $out;
+PERL
+}
+
+CHANGED_FILES=()
+SCANNED=0
+
+for file in "${FILES[@]}"; do
+  if [[ ! -r "$file" ]]; then
+    continue
+  fi
+
+  if ! scan_rewrite_line "$file"; then
+    continue
+  fi
+
+  SCANNED=$((SCANNED + 1))
+
+  before_hash="$(sha256sum "$file" | awk '{print $1}')"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    tmp_copy="$(mktemp)"
+    cp -a "$file" "$tmp_copy"
+    apply_transform "$tmp_copy"
+    after_hash="$(sha256sum "$tmp_copy" | awk '{print $1}')"
+    rm -f "$tmp_copy"
+    if [[ "$before_hash" != "$after_hash" ]]; then
+      CHANGED_FILES+=("$file")
+    fi
+    continue
+  fi
+
+  backup_path="${BACKUP_DIR}/${file#/}"
+  mkdir -p "$(dirname "$backup_path")"
+  cp -a "$file" "$backup_path"
+
+  apply_transform "$file"
+
+  after_hash="$(sha256sum "$file" | awk '{print $1}')"
+  if [[ "$before_hash" != "$after_hash" ]]; then
+    CHANGED_FILES+=("$file")
+  else
+    rm -f "$backup_path"
+  fi
+done
+
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "Scanned candidate files: $SCANNED"
+  echo "Files that would be changed: ${#CHANGED_FILES[@]}"
+  for file in "${CHANGED_FILES[@]}"; do
+    echo "  - $file"
+  done
+  exit 0
+fi
+
+if [[ ${#CHANGED_FILES[@]} -eq 0 ]]; then
+  echo "Scanned candidate files: $SCANNED"
+  echo "No rewrite lines required migration."
+  rmdir "$BACKUP_DIR" 2>/dev/null || true
+  exit 0
+fi
+
+echo "Scanned candidate files: $SCANNED"
+echo "Updated files: ${#CHANGED_FILES[@]}"
+for file in "${CHANGED_FILES[@]}"; do
+  echo "  - $file"
+done
+
+echo "Backup path: $BACKUP_DIR"
+
+if [[ $RUN_NGINX_TEST -eq 1 ]]; then
+  if command -v nginx >/dev/null 2>&1; then
+    echo "Running nginx -t ..."
+    nginx -t
+    echo "nginx -t OK"
+  else
+    echo "WARN: nginx binary not found in PATH; skipped config test." >&2
+  fi
+fi

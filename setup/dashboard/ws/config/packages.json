@@ -93,9 +93,10 @@
         "boxonly"     : false,
         "services"    : {
             "emby-server" : {
-                "process"  : "emby-server",
-                "name"     : "Emby",
-                "username" : "emby"
+                "process"     : "EmbyServer",
+                "name"        : "Emby",
+                "username"    : "emby",
+                "systemdUnit" : "emby-server"
             }
         }
     }, {
@@ -278,9 +279,10 @@
         "boxonly"     : false,
         "services"    : {
             "plexmediaserver" : {
-                "process"  : "plexmediaserver",
+                "process"  : "Plex Media Server",
                 "name"     : "Plex",
-                "username" : "plex"
+                "username" : "plex",
+                "systemdUnit" : "plexmediaserver"
             }
         }
     }, {
@@ -292,9 +294,10 @@
         "boxonly"     : false,
         "services"    : {
             "rclone-web" : {
-                "process"  : "rcd",
+                "process"  : "rclone",
                 "name"     : "Rclone",
-                "username" : "$username$"
+                "username" : "$username$",
+                "systemdUnit" : "rclone-web@$username$"
             }
         }
     }, {
@@ -428,9 +431,10 @@
         "boxonly"     : false,
         "services"    : {
             "webdav" : {
-                "process"  : "webdav",
+                "process"  : "rclone",
                 "name"     : "WebDAV",
-                "username" : "$username$"
+                "username" : "$username$",
+                "systemdUnit" : "webdav@$username$"
             }
         }
     }, {

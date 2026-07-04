@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.12
+# Current version:  v1.6.0
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -216,8 +216,8 @@ function _installDepends() {
 
 function _installApp() {
 	# Denyhost not capable with 3.11 and above
-	_installPy 3.10.12
-	_initPyVenv 3.10.12 /opt/denyhosts root
+	_installPy 3.10.20
+	_initPyVenv 3.10.20 /opt/denyhosts root
 	_info "Building ${APP_TITLE}..."
 	cd /tmp || exit 1
 	_execute "wget -q -O get-pip.py https://bootstrap.pypa.io/get-pip.py"

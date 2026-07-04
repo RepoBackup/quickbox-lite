@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.12
+# Current version:  v1.6.0
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -398,6 +398,8 @@ EOF
 						// If empty, then will retrieve domain from HTTP_HOST / HTTP_X_FORWARDED_HOST
 
 EOF
+	chown www-data:www-data /srv/rutorrent/conf/config.php
+	chmod g+rw /srv/rutorrent/conf/config.php
 	cat >/srv/rutorrent/plugins/_task/conf.php <<TAS
 <?php
 // configuration parameters
@@ -419,6 +421,7 @@ TAS
 \$quotaUser = "${username}";
 ?>
 RUCONF
+	chown ${username}:${username} /srv/rutorrent/conf/users/${username}/config.php
 	done
 	_info "Starting ${APP_TITLE}..."
 	# schedule restart service

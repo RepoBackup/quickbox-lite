@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.12
+# Current version:  v1.6.0
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -750,8 +750,7 @@ DPHP
 }
 
 function _dependency() {
-	_addPHP
-	DEPLIST="sudo at bc build-essential curl wget nginx-extras subversion ssl-cert php7.4-cli php7.4-fpm php7.4 php7.4-dev php7.4-memcached memcached php7.4-curl php7.4-gd php7.4-geoip php7.4-json php7.4-mbstring php7.4-opcache php7.4-xml php7.4-xmlrpc php7.4-zip libfcgi0ldbl mcrypt libmcrypt-dev nano unzip htop iotop vnstat vnstati automake make openssl net-tools debconf-utils ntp rsync screenfetch"
+	DEPLIST="sudo at bc build-essential curl wget nginx-extras subversion ssl-cert mcrypt libmcrypt-dev nano unzip htop iotop vnstat vnstati automake make openssl net-tools debconf-utils ntp rsync screenfetch"
 	if [[ "$CODENAME" =~ ("trixie") ]]; then
 		DEPLIST=${DEPLIST//ntp/}
 	fi
@@ -853,7 +852,7 @@ function _webconsole() {
 		cat > /etc/nginx/apps/"${username}".console.conf <<WEBC
 location /${username}.console/ {
     proxy_pass http://127.0.0.1:4200;
-    rewrite ^/${username}.console(.*) /\$1 break;
+    rewrite ^/${username}.console(?P<path>.*) /\$path break;
     auth_basic "password Required";
     auth_basic_user_file /etc/htpasswd;
     proxy_set_header Upgrade \$http_upgrade;

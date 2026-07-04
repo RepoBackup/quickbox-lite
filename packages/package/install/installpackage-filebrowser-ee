@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.12
+# Current version:  v1.6.0
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -326,7 +326,7 @@ location /filebrowser-ee/ {
   client_max_body_size 0;
   auth_basic "Password Required";
   auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
-  rewrite ^/filebrowser-ee/(.*) /$1 break;
+  rewrite ^/filebrowser-ee/(?P<path>.*) /$path break;
   proxy_pass http://$remote_user.filebrowser-ee;
   proxy_http_version 1.1;
   proxy_set_header Upgrade $http_upgrade;

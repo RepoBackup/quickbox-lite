@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.12
+# Current version:  v1.6.0
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -72,6 +72,7 @@ function _error() {
 APP_TITLE="LibreSpeed"
 APP_NAME="speedtest"
 APP_BASEDEPS=""
+APP_PHPDEPS="php8.4-fpm"
 
 APP_LOCK=.$APP_NAME.lock
 OUTTO=/srv/dashboard/db/output.log
@@ -127,6 +128,38 @@ Please wait until the process is completed
 function _installAddSources() {
 	_info "Adding additional keys and sources ${APP_TITLE}..."
 	_success "Keys and sources added."
+}
+
+function _installPhpDepends() {
+	_info "Installing ${APP_TITLE} PHP dependencies..."
+	if [[ -f /etc/os-release ]]; then
+		# shellcheck disable=SC1091
+		source /etc/os-release
+	fi
+
+	if [[ "${ID}" == "ubuntu" ]]; then
+		wget -qO- "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x71DAEAAB4AD4CAB6" | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/php.gpg >>"${OUTTO}" 2>&1
+		cat >/etc/apt/sources.list.d/php.list <<DPHP
+deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/php.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu $(lsb_release -sc) main
+DPHP
+	elif [[ "${ID}" == "debian" ]]; then
+		wget -q https://packages.sury.org/php/apt.gpg -O /etc/apt/trusted.gpg.d/deb.sury.org-php.gpg >>"${OUTTO}" 2>&1
+		cat >/etc/apt/sources.list.d/php.list <<DPHP
+deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/deb.sury.org-php.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main
+DPHP
+	fi
+
+	DEBIAN_FRONTEND=noninteractive apt-get -yqq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" update >>"${OUTTO}" 2>&1
+	for depend in ${APP_PHPDEPS}; do
+		_info "Installing ${depend}... "
+		_execute "apt-get -y --allow-unauthenticated -f install ${depend}" || { _error "Could not install ${depend}." && dependError=1; }
+	done
+	if [[ $dependError != "1" ]]; then
+		_success "${APP_TITLE} PHP dependencies installed."
+	else
+		_error "${APP_TITLE} PHP dependencies failed to install."
+		exit 1
+	fi
 }
 
 function _installSystemUpdates() {
@@ -226,6 +259,15 @@ location /speedtest/empty {
   return 200;
   gzip off;
 }
+
+
+location ~ ^/speedtest/backend/(?P<path>.+\.php)$ {
+	auth_basic "Password Required";
+	auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
+	include snippets/fastcgi-php.conf;
+	fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+	fastcgi_param SCRIPT_FILENAME /srv/speedtest/backend/$path;
+}
 EOF
 	_execute "nginx -s reload"
 	_success "${APP_TITLE} configured."
@@ -280,6 +322,8 @@ done
 _lockCheck
 _setLock
 _installInfo
+_installPhpDepends
+_installDepends
 _installApp
 _configureApp
 _installAppLock

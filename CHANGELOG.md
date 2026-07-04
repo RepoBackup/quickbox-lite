@@ -1,3 +1,37 @@
+## CHANGELOG v1.6.0
+
+*Changelog update Saturday, Jul 04, 2026*
+
+### General additions
+
+- Add NGINX Rift mitigation helper for CVE-2026-42945
+
+### Important changes
+
+- Dashboard WebSocket/backend stack was refactored and expanded with modular TypeScript controllers/handlers and broader test coverage (by Tautcony)
+- Migrate PHP-FPM handling to PHP 8.4 and prioritize php8.4-fpm service detection
+
+### Function improved
+
+- Add/standardize `systemdUnit` service metadata for Emby, Plex, Rclone Web, and WebDAV
+- Improve service process checks and service naming consistency
+- Improve SSL and Nginx hardening paths
+
+### Function updated
+
+- Move ruTorrent-related PHP package requirements into ruTorrent package scope
+- Update package dependency set (including Python baseline refresh and Node.js patch mirror)
+- Use Let's Encrypt path by default for certificate workflow
+
+### Bug fixed
+
+- Fix ruTorrent PHP dependency/path issues and config permission problems
+- Fix SABnzbd exposure issue
+- Pin pyOpenSSL version to avoid Deluge incompatibility
+- Fix libtorrent base version handling
+
+---
+
 ## CHANGELOG v1.5.12
 
 *Changelog update Thirsday, Dec 11, 2025*

@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.12
+# Current version:  v1.6.0
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -228,7 +228,7 @@ function _updateApp() {
 	fi
 	_info "Building ${APP_TITLE}..."
 	# Install for single user
-	python_ver="3.12.8"
+	python_ver="3.13.14"
 	_installPy ${python_ver}
 	_initPyVenv ${python_ver} /home/${username}/.local/flexget3 ${username}
 	cd /home/${username}/.local/flexget3

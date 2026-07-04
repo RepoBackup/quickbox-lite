@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.5.12
+# Current version:  v1.6.0
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -67,6 +67,7 @@ function _error() {
 APP_TITLE="ruTorrent"
 APP_NAME="rutorrent"
 APP_BASEDEPS="sox libsox-fmt-mp3 geoip-database mediainfo zip unzip p7zip-full"
+APP_PHPDEPS="php8.4-cli php8.4-fpm php8.4-curl php8.4-gd php8.4-mbstring php8.4-opcache php8.4-dom php8.4-sockets"
 
 APP_LOCK=.$APP_NAME.lock
 OUTTO=/srv/dashboard/db/output.log
@@ -151,6 +152,64 @@ function _installSystemUpdates() {
 		fi
 	fi
 	_success "System updated."
+}
+
+function _installPhpDepends() {
+	_info "Installing ${APP_TITLE} PHP dependencies..."
+	# ruTorrent in this project is pinned to php8.4-fpm in nginx config.
+	if [[ -f /etc/os-release ]]; then
+		# shellcheck disable=SC1091
+		source /etc/os-release
+	fi
+
+	if [[ "${ID}" == "ubuntu" ]]; then
+		wget -qO- "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x71DAEAAB4AD4CAB6" | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/php.gpg >>"${OUTTO}" 2>&1
+		cat >/etc/apt/sources.list.d/php.list <<DPHP
+deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/php.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu $(lsb_release -sc) main
+DPHP
+	elif [[ "${ID}" == "debian" ]]; then
+		wget -q https://packages.sury.org/php/apt.gpg -O /etc/apt/trusted.gpg.d/deb.sury.org-php.gpg >>"${OUTTO}" 2>&1
+		cat >/etc/apt/sources.list.d/php.list <<DPHP
+deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/trusted.gpg.d/deb.sury.org-php.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main
+DPHP
+	fi
+
+	DEBIAN_FRONTEND=noninteractive apt-get -yqq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" update >>"${OUTTO}" 2>&1
+	for depend in ${APP_PHPDEPS}; do
+		_info "Installing ${depend}... "
+		_execute "apt-get -y --allow-unauthenticated -f install ${depend}" || { _error "Could not install ${depend}." && dependError=1; }
+	done
+	if [[ $dependError != "1" ]]; then
+		_success "${APP_TITLE} PHP dependencies installed."
+	else
+		_error "${APP_TITLE} PHP dependencies failed to install."
+		exit 1
+	fi
+}
+
+function _configurePhpFpm() {
+	_info "Configuring PHP-FPM for ${APP_TITLE}..."
+	local php_fpm_ini="/etc/php/8.4/fpm/php.ini"
+	if [[ ! -f "${php_fpm_ini}" ]]; then
+		_error "PHP-FPM config not found at ${php_fpm_ini}."
+		exit 1
+	fi
+
+	# Keep ruTorrent upload and opcache defaults aligned with legacy QuickBox tuning.
+	sed -i.bak -e "s/post_max_size.*/post_max_size = 64M/" \
+		-e "s/upload_max_filesize.*/upload_max_filesize = 92M/" \
+		-e "s/expose_php.*/expose_php = Off/" \
+		-e "s/128M/768M/" \
+		-e "s/;cgi.fix_pathinfo.*/cgi.fix_pathinfo=1/" \
+		-e "s/;opcache.enable.*/opcache.enable=1/" \
+		-e "s/;opcache.memory_consumption.*/opcache.memory_consumption=128/" \
+		-e "s/;opcache.max_accelerated_files.*/opcache.max_accelerated_files=4000/" \
+		-e "s/;opcache.revalidate_freq.*/opcache.revalidate_freq=240/" "${php_fpm_ini}" >>"${OUTTO}" 2>&1
+
+	phpenmod -v 8.4 opcache >>"${OUTTO}" 2>&1
+	phpenmod -v 8.4 xml >>"${OUTTO}" 2>&1
+	phpenmod -v 8.4 mbstring >>"${OUTTO}" 2>&1
+	_success "PHP-FPM configured for ${APP_TITLE}."
 }
 
 function _installDepends() {
@@ -423,6 +482,8 @@ EOF
 						// If empty, then will retrieve domain from HTTP_HOST / HTTP_X_FORWARDED_HOST
 
 EOF
+	chown www-data:www-data /srv/rutorrent/conf/config.php
+	chmod g+rw /srv/rutorrent/conf/config.php
 	cat >/srv/rutorrent/plugins/_task/conf.php <<TAS
 <?php
 // configuration parameters
@@ -443,7 +504,7 @@ location /rutorrent {
   location ~ \.php$
   {
     fastcgi_read_timeout 240;
-    fastcgi_pass  unix:/run/php/php7.4-fpm.sock;
+    fastcgi_pass  unix:/run/php/php8.4-fpm.sock;
     include snippets/fastcgi-php.conf;
     fastcgi_param SCRIPT_FILENAME /srv\$fastcgi_script_name;
   }
@@ -464,6 +525,7 @@ NGX
 \$quotaUser = "${username}";
 ?>
 RUCONF
+	chown ${username}:${username} /srv/rutorrent/conf/users/${username}/config.php
 	done
 	_success "${APP_TITLE} configured."
 }
@@ -479,8 +541,8 @@ function _installAppStart() {
 	# schedule restart service
 	SHELL=/bin/bash at now + 1 minute >>"${OUTTO}" 2>&1 <<EOF
 sleep 5;\
-/usr/local/bin/quickbox/system/auxiliary/php-fpm-cli -r 'opcache_reset();';\
-systemctl restart php7.4-fpm;\
+	/usr/local/bin/quickbox/system/auxiliary/php-fpm-cli -connect /run/php/php8.4-fpm.sock -r 'opcache_reset();';\
+systemctl restart php8.4-fpm;\
 nginx -s reload
 EOF
 	_success "${APP_TITLE} started."
@@ -522,6 +584,8 @@ _installInfo
 if [[ ! -f /install/.system.lock ]]; then
 	_installSystemUpdates
 fi
+_installPhpDepends
+_configurePhpFpm
 _installDepends
 _installApp
 _configureApp

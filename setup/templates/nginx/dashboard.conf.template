@@ -39,7 +39,7 @@ location ^~ /ws {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     include snippets/proxy.conf;
-    rewrite ^/ws/(.*) /$1 break;
+    rewrite ^/ws/(?P<path>.*) /$path break;
 }
 
 location / {
