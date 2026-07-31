@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   JMSolo | Mischief | Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -286,7 +286,7 @@ Type=simple
 User=${username}
 Group=${username}
 Environment="PYTHONIOENCODING=utf-8"
-ExecStart=${pybin}/python ${pypath}/SABnzbd.py --config-file /home/${username}/.sabnzbd/sabnzbd.ini --server 127.0.0.1:${APP_WEB_PORT} --browser 0 --inet_exposure 4 --https ${APP_TLS_WEB_PORT} &
+ExecStart=${pybin}/python ${pypath}/SABnzbd.py --config-file /home/${username}/.sabnzbd/sabnzbd.ini --server 127.0.0.1:${APP_WEB_PORT} --browser 0 --inet_exposure 5 --https ${APP_TLS_WEB_PORT} &
 Restart=always
 SyslogIdentifier=SABnzbd Usenet Client
 
@@ -301,8 +301,7 @@ location /${APP_NAME} {
   proxy_set_header Upgrade \$http_upgrade;
   proxy_set_header Connection \$http_connection;
   proxy_set_header Host \$proxy_host;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth proxy "/etc/htpasswd.d/htpasswd.${username}" "  ")
 }
 
 location /${APP_NAME}/api {
@@ -324,11 +323,10 @@ EOF
 
 	_execute "systemctl stop sabnzbd@${username}"
 
-	encpass=$(sed -e 's/[&\\/]/\\&/g; s/\$/\\$/g; s/@/\\@/g;' <<<"$password")
 	sed -i "s/url_base = \"\"/url_base = \"\/sabnzbd\"/g" /home/${username}/.sabnzbd/sabnzbd.ini
-	sed -i "s/username = \"\"/username = \"${username}\"/g" /home/${username}/.sabnzbd/sabnzbd.ini
+	sed -i "s/username = \"\"/username = \"\"/g" /home/${username}/.sabnzbd/sabnzbd.ini
 	sed -i "s/html_login = 1/html_login = 0/g" /home/${username}/.sabnzbd/sabnzbd.ini
-	perl -pi -e "s/password = \"\"/password = \"${encpass}\"/" /home/${username}/.sabnzbd/sabnzbd.ini
+	sed -i "s/password = \"\"/password = \"\"/g" /home/${username}/.sabnzbd/sabnzbd.ini
 
 	chown ${username}:${username} -R /home/${username}/.sabnzbd/
 	_execute "systemctl start sabnzbd@${username}"

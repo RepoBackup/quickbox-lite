@@ -8,6 +8,7 @@
 #
 #
 #Defaults  env_keep -="HOME"
+Defaults  secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin/quickbox/system:/usr/local/bin/quickbox/system/auxiliary:/usr/local/bin/quickbox/system/theme:/usr/local/bin/quickbox/package:/usr/local/bin/quickbox/package/install:/usr/local/bin/quickbox/package/remove:/usr/local/bin/quickbox/package/update:/usr/local/bin/quickbox/plugins:/usr/local/bin/quickbox/plugins/install:/usr/local/bin/quickbox/plugins/remove"
 
 # Host alias specification
 

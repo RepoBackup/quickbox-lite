@@ -1,0 +1,456 @@
+#!/bin/bash
+#
+# [QuickBox Lite Vouch Proxy Installer]
+#
+# GitHub:   https://github.com/amefs/quickbox-lite
+# Author:   Amefs
+# Current version:  v1.6.1
+# URL:
+# Original Repo:    https://github.com/QuickBox/QB
+# Credits to:       QuickBox.io
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+#################################################################################
+################################################################################
+# HELP FUNCTIONS
+################################################################################
+
+set -euo pipefail
+
+export NEWT_COLORS='
+root=,black
+window=,lightgray
+shadow=,color8
+title=color8,
+checkbox=,magenta
+entry=,color8
+label=blue,
+actlistbox=,magenta
+actsellistbox=,magenta
+helpline=,magenta
+roottext=,magenta
+emptyscale=magenta
+disabledentry=magenta,
+'
+
+_norm=$(tput sgr0)
+_red=$(tput setaf 1)
+_green=$(tput setaf 2)
+_tan=$(tput setaf 3)
+_cyan=$(tput setaf 6)
+
+_execute() { ($1 >>"${OUTTO}" 2>&1); }
+_print() { printf "${_norm}%s${_norm}\n" "$@"; printf "%s\n" "$@" >>"${OUTTO}"; }
+_info() { printf "${_cyan}➜ %s${_norm}\n" "$@"; printf ">> Info: %s\n" "$@" >>"${OUTTO}"; }
+_success() { printf "${_green}✓ %s${_norm}\n" "$@"; printf ">> Success: %s\n" "$@" >>"${OUTTO}"; }
+_warning() { printf "${_tan}⚠ %s${_norm}\n" "$@"; printf ">> Warning: %s\n" "$@" >>"${OUTTO}"; }
+_error() { printf "${_red}✗ %s${_norm}\n" "$@"; printf ">> Error: %s\n" "$@" >>"${OUTTO}"; }
+
+#################################################################################
+# APP VARIABLE
+#################################################################################
+APP_TITLE="Vouch Proxy"
+APP_NAME="vouchproxy"
+APP_SERVICE="vouch-proxy"
+APP_LOCK=.${APP_NAME}.lock
+APP_BASEDEPS=""
+OUTTO=/srv/dashboard/db/output.log
+
+OIDC_AUTH_URL=""
+OIDC_TOKEN_URL=""
+OIDC_USERINFO_URL=""
+OIDC_CLIENT_ID=""
+OIDC_CLIENT_SECRET=""
+OIDC_END_SESSION_ENDPOINT=""
+LOGIN_DOMAIN=""
+OIDC_USER=""
+OIDC_USER_MAP=""
+EMAIL_DOMAINS=""
+
+################################################################################
+# SCRIPT FUNCTIONS
+################################################################################
+_usage() {
+  echo -e "\nQuickBox Lite ${APP_TITLE} Installer"
+  echo -e "\nUsage:\n$(basename "$0") [-l logfile] --auth-url URL --token-url URL --userinfo-url URL --client-id ID --client-secret SECRET --domain DOMAIN [--oidc-user USER] [--oidc-map CSV]"
+  echo -e "\nOptions:\n"
+  echo "-l, --log <logfile>              specific log file"
+  echo "--auth-url <url>                 OIDC authorize endpoint"
+  echo "--token-url <url>                OIDC token endpoint"
+  echo "--userinfo-url <url>             OIDC userinfo endpoint"
+  echo "--client-id <id>                 OIDC client id"
+  echo "--client-secret <secret>         OIDC client secret"
+  echo "--end-session-endpoint <url>     OIDC end-session/logout endpoint (optional)"
+  echo "--domain <domain>                external login domain"
+  echo "--oidc-user <user>               OIDC username allowed to access local admin (default: local admin name)"
+  echo "--oidc-map <csv>                 comma-separated OIDC usernames mapped to local admin"
+  echo "--email-domains <csv>            comma-separated allowed email domains (default: login domain)"
+  echo "-h, --help                       display this help and exit"
+}
+
+_lockCheck() {
+  # install docker stack runtime through the dedicated package installer
+  if [[ ! -f /install/.docker.lock ]]; then
+    bash /usr/local/bin/quickbox/package/install/installpackage-docker -l "$OUTTO"
+  fi
+
+  if [[ -f "/install/.install.lock" ]]; then
+    prevApp=$(cat /install/.install.lock)
+    _info "$prevApp process running."
+    _error "Exiting..."
+    exit 1
+  fi
+  if [[ -f "/install/$APP_LOCK" ]]; then
+    _error "${APP_TITLE} already installed!"
+    exit 1
+  fi
+  if [[ -f "/install/.authelia.lock" ]]; then
+    _error "Authelia is already installed. Remove Authelia before installing ${APP_TITLE}."
+    exit 1
+  fi
+}
+
+_setLock() { echo "${APP_TITLE}" >/install/.install.lock; }
+_clearInstallLock() {
+  if [[ -f /install/.install.lock ]] && [[ "$(cat /install/.install.lock)" == "${APP_TITLE}" ]]; then
+    rm -f /install/.install.lock
+  fi
+}
+_lockCleanup() {
+  echo "$APP_TITLE Install Complete!" >>"${OUTTO}" 2>&1
+  _clearInstallLock
+}
+_validationExit() {
+  _clearInstallLock
+  exit 1
+}
+
+_validateRequired() {
+  local admin_user
+  local normalized_domain
+
+  if [[ -z "$OIDC_AUTH_URL" || -z "$OIDC_TOKEN_URL" || -z "$OIDC_USERINFO_URL" || -z "$OIDC_CLIENT_ID" || -z "$OIDC_CLIENT_SECRET" || -z "$LOGIN_DOMAIN" ]]; then
+    _error "Missing required OIDC configuration arguments."
+    _usage
+    _validationExit
+  fi
+
+  admin_user=$(cut -d: -f1 /root/.admin.info)
+  if [[ -z "$admin_user" ]]; then
+    _error "Could not determine local admin username for OIDC mapping."
+    _validationExit
+  fi
+
+  if [[ -z "$OIDC_USER_MAP" ]]; then
+    if [[ -z "$OIDC_USER" ]]; then
+      OIDC_USER="$admin_user"
+    fi
+    OIDC_USER_MAP="$OIDC_USER"
+  fi
+
+  if [[ -z "$OIDC_USER_MAP" ]]; then
+    _error "OIDC map cannot be empty."
+    _validationExit
+  fi
+
+  # Normalize optional end-session endpoint (trim spaces and strip outer quotes).
+  if [[ -n "$OIDC_END_SESSION_ENDPOINT" ]]; then
+    OIDC_END_SESSION_ENDPOINT="$(echo "$OIDC_END_SESSION_ENDPOINT" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    OIDC_END_SESSION_ENDPOINT="${OIDC_END_SESSION_ENDPOINT#\"}"
+    OIDC_END_SESSION_ENDPOINT="${OIDC_END_SESSION_ENDPOINT%\"}"
+    OIDC_END_SESSION_ENDPOINT="${OIDC_END_SESSION_ENDPOINT#\'}"
+    OIDC_END_SESSION_ENDPOINT="${OIDC_END_SESSION_ENDPOINT%\'}"
+  fi
+
+  if [[ -z "$EMAIL_DOMAINS" ]]; then
+    EMAIL_DOMAINS="$LOGIN_DOMAIN"
+  fi
+
+  # Strip outer quotes from EMAIL_DOMAINS if present
+  EMAIL_DOMAINS="${EMAIL_DOMAINS#\"}"
+  EMAIL_DOMAINS="${EMAIL_DOMAINS%\"}"
+  EMAIL_DOMAINS="${EMAIL_DOMAINS#\'}"
+  EMAIL_DOMAINS="${EMAIL_DOMAINS%\'}"
+
+  normalized_domain="${LOGIN_DOMAIN#http://}"
+  normalized_domain="${normalized_domain#https://}"
+  normalized_domain="${normalized_domain%%/*}"
+  normalized_domain="$(echo "$normalized_domain" | xargs)"
+  normalized_domain="${normalized_domain#\"}"
+  normalized_domain="${normalized_domain%\"}"
+  normalized_domain="${normalized_domain#\'}"
+  normalized_domain="${normalized_domain%\'}"
+
+  # Always persist/login with a bare host name in vouch config (no scheme/path).
+  LOGIN_DOMAIN="$normalized_domain"
+
+  if [[ "$normalized_domain" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    _error "OIDC login domain cannot be a raw IP address for reliable browser cookie/session behavior."
+    _error "Use a DNS hostname with valid TLS cert (for example: qb.example.com)."
+    _validationExit
+  fi
+
+  if [[ "$OIDC_AUTH_URL" == *"://${normalized_domain}"* ]] || [[ "$OIDC_TOKEN_URL" == *"://${normalized_domain}"* ]] || [[ "$OIDC_USERINFO_URL" == *"://${normalized_domain}"* ]]; then
+    _error "OIDC endpoint URLs must point to your provider (for example *.auth0.com), not your QuickBox domain/IP."
+    _error "Current login domain: ${LOGIN_DOMAIN}"
+    _validationExit
+  fi
+
+  if [[ -n "$OIDC_END_SESSION_ENDPOINT" ]] && [[ ! "$OIDC_END_SESSION_ENDPOINT" =~ ^https?:// ]]; then
+    _error "OIDC end-session endpoint must be an absolute http(s) URL."
+    _validationExit
+  fi
+}
+
+_installDepends() {
+  _info "Installing ${APP_TITLE} dependencies..."
+  for depend in $APP_BASEDEPS; do
+    _execute "apt-get -y --allow-unauthenticated -f install ${depend}" || { _error "Could not install ${depend}."; exit 1; }
+  done
+  _success "${APP_TITLE} dependencies installed."
+}
+
+_installApp() {
+  _info "Preparing ${APP_TITLE} runtime..."
+  mkdir -p /opt/vouch-proxy
+  chmod 700 /opt/vouch-proxy
+
+  # Build domains list from comma-separated EMAIL_DOMAINS
+  local domains_yaml=""
+  IFS=',' read -r -a email_domain_array <<<"$EMAIL_DOMAINS"
+  for domain in "${email_domain_array[@]}"; do
+    # Trim leading/trailing whitespace using sed
+    domain=$(echo "$domain" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ -n "$domain" ]]; then
+      domains_yaml+="    - $domain"$'\n'
+    fi
+  done
+
+  VOUCH_PROXY_JWT_SECRET="${VOUCH_PROXY_JWT_SECRET:-$(openssl rand -hex 32)}"
+
+  local post_logout_redirects_yaml=""
+  post_logout_redirects_yaml+="    - /"$'\n'
+  post_logout_redirects_yaml+="    - https://${LOGIN_DOMAIN}/"$'\n'
+  if [[ -n "$OIDC_END_SESSION_ENDPOINT" ]]; then
+    post_logout_redirects_yaml+="    - ${OIDC_END_SESSION_ENDPOINT}"$'\n'
+  fi
+
+  cat >/opt/vouch-proxy/config.yml <<EOF
+vouch:
+  logLevel: info
+  listen: 0.0.0.0
+  port: 9090
+  domains:
+${domains_yaml}
+  jwt:
+    secret: "${VOUCH_PROXY_JWT_SECRET}"
+  post_logout_redirect_uris:
+${post_logout_redirects_yaml}
+oauth:
+  provider: oidc
+  auth_url: ${OIDC_AUTH_URL}
+  token_url: ${OIDC_TOKEN_URL}
+  user_info_url: ${OIDC_USERINFO_URL}
+EOF
+
+  if [[ -n "$OIDC_END_SESSION_ENDPOINT" ]]; then
+    cat >>/opt/vouch-proxy/config.yml <<EOF
+  end_session_endpoint: '${OIDC_END_SESSION_ENDPOINT}'
+EOF
+  fi
+
+  cat >>/opt/vouch-proxy/config.yml <<EOF
+  callback_url: 'https://${LOGIN_DOMAIN}/auth'
+  client_id: ${OIDC_CLIENT_ID}
+  client_secret: ${OIDC_CLIENT_SECRET}
+  scopes:
+    - openid
+    - profile
+    - email
+EOF
+  chown -R www-data:www-data /opt/vouch-proxy
+  chmod 644 /opt/vouch-proxy/config.yml
+
+  vouch_uid=$(id -u www-data)
+  vouch_gid=$(id -g www-data)
+  cat >/opt/vouch-proxy/docker-compose.yml <<EOF
+services:
+  vouch-proxy:
+    image: quay.io/vouch/vouch-proxy:latest
+    container_name: vouch-proxy
+    user: "${vouch_uid}:${vouch_gid}"
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+    volumes:
+      - /opt/vouch-proxy/config.yml:/config/config.yml:ro
+EOF
+
+  cat >/etc/systemd/system/${APP_SERVICE}.service <<'EOF'
+[Unit]
+Description=Vouch Proxy container
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/opt/vouch-proxy
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat >/etc/nginx/apps/vouchproxy-auth.conf <<'EOF'
+location = /validate {
+  internal;
+  proxy_pass http://127.0.0.1:9090/validate;
+  proxy_pass_request_body off;
+  proxy_set_header Content-Length "";
+  proxy_set_header X-Original-URI $request_uri;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-Uri $request_uri;
+}
+
+location @qb_vouch_signin {
+  return 302 /login?url=$scheme://$http_host$request_uri;
+}
+
+location /login {
+  proxy_pass http://127.0.0.1:9090/login;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+
+location = /logout {
+  proxy_pass http://127.0.0.1:9090/logout$is_args$args;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+
+location = /auth/vouch/callback {
+  proxy_pass http://127.0.0.1:9090/auth$is_args$args;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+
+location /auth {
+  proxy_pass http://127.0.0.1:9090;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+EOF
+
+  local_admin_user=$(cut -d: -f1 /root/.admin.info)
+  cat >/etc/nginx/conf.d/vouch-user-map.conf <<EOF
+# Map authenticated OIDC user to the local QuickBox admin user.
+map \$auth_resp_x_vouch_user \$qb_vouch_local_user {
+  default "";
+EOF
+
+  IFS=',' read -r -a oidc_users <<<"$OIDC_USER_MAP"
+  for oidc_user in "${oidc_users[@]}"; do
+    oidc_user="$(echo "$oidc_user" | xargs)"
+    if [[ -n "$oidc_user" ]]; then
+      printf '  "%s" "%s";\n' "$oidc_user" "$local_admin_user" >>/etc/nginx/conf.d/vouch-user-map.conf
+    fi
+  done
+  echo "}" >>/etc/nginx/conf.d/vouch-user-map.conf
+
+  chmod +x /usr/local/bin/quickbox/system/auxiliary/qbAuthMigrate || true
+  _execute "/usr/local/bin/quickbox/system/auxiliary/qbAuthMigrate --migrate"
+
+  _execute "systemctl daemon-reload"
+  _execute "systemctl enable ${APP_SERVICE}"
+  _execute "systemctl restart ${APP_SERVICE}"
+  _execute "nginx -t"
+  _execute "nginx -s reload"
+  _success "${APP_TITLE} configured."
+}
+
+_installAppLock() {
+  _info "Configuring ${APP_TITLE} lock..."
+  touch /install/${APP_LOCK}
+  _success "${APP_TITLE} lock configured."
+}
+
+if ! ARGS=$(getopt -a -o hl: -l help,log:,auth-url:,token-url:,userinfo-url:,client-id:,client-secret:,end-session-endpoint:,domain:,oidc-user:,oidc-map:,email-domains: -- "$@"); then
+  _usage
+  exit 1
+fi
+
+# shellcheck disable=SC2086
+eval set -- "${ARGS}"
+while true; do
+  case "$1" in
+    -h|--help)
+      _usage
+      exit 0
+      ;;
+    -l|--log)
+      OUTTO="$2"
+      shift
+      ;;
+    --auth-url)
+      OIDC_AUTH_URL="$2"
+      shift
+      ;;
+    --token-url)
+      OIDC_TOKEN_URL="$2"
+      shift
+      ;;
+    --userinfo-url)
+      OIDC_USERINFO_URL="$2"
+      shift
+      ;;
+    --client-id)
+      OIDC_CLIENT_ID="$2"
+      shift
+      ;;
+    --client-secret)
+      OIDC_CLIENT_SECRET="$2"
+      shift
+      ;;
+    --end-session-endpoint)
+      OIDC_END_SESSION_ENDPOINT="$2"
+      shift
+      ;;
+    --domain)
+      LOGIN_DOMAIN="$2"
+      shift
+      ;;
+    --oidc-user)
+      OIDC_USER="$2"
+      shift
+      ;;
+    --oidc-map)
+      OIDC_USER_MAP="$2"
+      shift
+      ;;
+    --email-domains)
+      EMAIL_DOMAINS="$2"
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+  esac
+  shift
+done
+
+_lockCheck
+_setLock
+_validateRequired
+_installDepends
+_installApp
+_installAppLock
+_lockCleanup

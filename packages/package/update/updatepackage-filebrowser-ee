@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -116,16 +116,12 @@ Please wait until the process is completed
 
 function _updateApp() {
 	_info "Updating ${APP_TITLE}..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		_execute "systemctl stop ${APP_SERVICE}@${username}"
-	done
-	cd /tmp
+	local username
+	username=$(cut -d: -f1 /root/.admin.info)
+	_execute "systemctl stop ${APP_SERVICE}@${username}"
+	cd /tmp || exit 1
 	_execute "/usr/bin/docker pull 80x86/filebrowser:amd64"
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		_execute "systemctl start ${APP_SERVICE}@${username}"
-	done
+	_execute "systemctl start ${APP_SERVICE}@${username}"
 	_success "${APP_TITLE} is now update to date."
 }
 

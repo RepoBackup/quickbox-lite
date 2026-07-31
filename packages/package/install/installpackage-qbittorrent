@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -387,8 +387,8 @@ function _installApp() {
 function _configureApp() {
 	_info "Configuring ${APP_TITLE}..."
 
-	# get userlist
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
+	# single-user mode: use admin account only
+	userlist=$(cat /root/.admin.info | cut -d: -f1)
 	for username in $userlist; do
 		# get used port
 		local usedport=""
@@ -402,7 +402,7 @@ function _configureApp() {
 		done
 		echo "$PORT" >/install/$username.$APP_NAME.port
 		passphrase=$(cat /root/.ssh/local_user)
-		passtext=$(cat /root/.qbuser/${username}.info | cut -d: -f2)
+		passtext=$(cat /root/.admin.info | cut -d: -f2)
 		password=$(echo ${passtext} | openssl enc -aes-128-ecb -pbkdf2 -a -d -pass pass:"${passphrase}" -nosalt)
 
 		mkdir -p /home/${username}/.config/qBittorrent
@@ -472,8 +472,7 @@ EOF
 location /${username}.qbittorrent.downloads {
   alias /home/${username}/torrents/qbittorrent;
   include /etc/nginx/snippets/fancyindex.conf;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.${username}" "  ")
 
   location ~* \.php$ {
 
@@ -488,23 +487,22 @@ EOF
 		fi
 	done
 
-	cat >/etc/nginx/apps/qbittorrent.conf <<'QBRP'
+	cat >/etc/nginx/apps/qbittorrent.conf <<QBRP
 location /qbittorrent {
   return 301 /qbittorrent/;
 }
 
 location /qbittorrent/ {
   include /etc/nginx/snippets/proxy.conf;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
-  proxy_set_header        X-Forwarded-Host        $server_name:$server_port;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth proxy "/etc/htpasswd.d/htpasswd.${username}" "  ")
+	proxy_set_header        X-Forwarded-Host        \$server_name:\$server_port;
   proxy_hide_header       Referer;
   proxy_hide_header       Origin;
   proxy_set_header        Referer                 '';
   proxy_set_header        Origin                  '';
   add_header              X-Frame-Options         "SAMEORIGIN";
-  rewrite ^/qbittorrent/(?P<path>.*) /$path break;
-  proxy_pass  http://$remote_user.qbittorrent;
+	rewrite ^/qbittorrent/(?P<path>.*) /\$path break;
+	proxy_pass  http://${username}.qbittorrent;
 }
 QBRP
 
@@ -542,7 +540,7 @@ function _installAppLock() {
 
 function _installAppStart() {
 	_info "Starting ${APP_TITLE}..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
+	userlist=$(cat /root/.admin.info | cut -d: -f1)
 	for username in $userlist; do
 		_execute "systemctl enable ${APP_SERVICE}@${username}"
 		_execute "systemctl start ${APP_SERVICE}@${username}"

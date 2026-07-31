@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -228,8 +228,7 @@ EOF
 		# Generate reverse proxy upstream
 		cat >/etc/nginx/apps/${username}.resilio-sync.conf <<EOF
 location /${username}.btsync/ {
-    auth_basic "Password Required";
-    auth_basic_user_file /etc/htpasswd.d/htpasswd.\$remote_user;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth proxy "/etc/htpasswd.d/htpasswd.${username}" "    ")
     rewrite ^/${username}/btsync/gui(?P<path>.*) /${username}.btsync\$path last;
     proxy_pass http://${APP_HOST}:${PORT}/gui/;
     proxy_redirect /gui/ /${username}.btsync/;

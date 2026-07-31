@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -755,8 +755,8 @@ function _configureApp() {
 	wget --no-check-certificate -q -O /usr/local/bin/quickbox/deluge/plugins/TotalTraffic-0.5-py2.7.egg https://forum.deluge-torrent.org/download/file.php?id=4247
 	wget --no-check-certificate -q -O /usr/local/bin/quickbox/deluge/plugins/Stats-0.3.2-py2.7.egg https://github.com/downloads/ianmartin/Deluge-stats-plugin/Stats-0.3.2-py2.7.egg
 
-	# get userlist
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
+	# single-user mode: use admin account only
+	userlist=$(cat /root/.admin.info | cut -d: -f1)
 	for username in $userlist; do
 		# get used port
 		local usedport=""
@@ -781,7 +781,7 @@ function _configureApp() {
 		done
 		echo "$DWPORT" >/install/$username.deluge-web.port
 		passphrase=$(cat /root/.ssh/local_user)
-		passtext=$(cat /root/.qbuser/${username}.info | cut -d: -f2)
+		passtext=$(cat /root/.admin.info | cut -d: -f2)
 		password=$(echo ${passtext} | openssl enc -aes-128-ecb -pbkdf2 -a -d -pass pass:${passphrase} -nosalt)
 
 		DWSALT=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
@@ -1003,8 +1003,7 @@ EOF
 location /${username}.deluge.downloads {
   alias /home/${username}/torrents/deluge;
   include /etc/nginx/snippets/fancyindex.conf;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.${username}" "  ")
 
   location ~* \.php$ {
 
@@ -1033,18 +1032,17 @@ EOF
 			sed -i "s/DEPORT/${DPORT}/g" /home/${username}/.config/autoremovetorrents/config.yml
 		fi
 	done
-	cat >/etc/nginx/apps/deluge.conf <<'DRP'
+	cat >/etc/nginx/apps/deluge.conf <<DRP
 location /deluge {
   return 301 /deluge/;
 }
 
 location /deluge/ {
   include /etc/nginx/snippets/proxy.conf;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth proxy "/etc/htpasswd.d/htpasswd.${username}" "  ")
   proxy_set_header X-Deluge-Base "/deluge/";
-  rewrite ^/deluge/(?P<path>.*) /$path break;
-  proxy_pass http://$remote_user.deluge;
+	rewrite ^/deluge/(?P<path>.*) /\$path break;
+	proxy_pass http://${username}.deluge;
 }
 DRP
 	cat >/etc/systemd/system/deluged@.service <<DDS
@@ -1114,7 +1112,7 @@ function _installAppLock() {
 
 function _installAppStart() {
 	_info "Starting ${APP_TITLE}..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
+	userlist=$(cat /root/.admin.info | cut -d: -f1)
 	for username in $userlist; do
 		_execute "systemctl enable deluged@${username}"
 		_execute "systemctl start deluged@${username}"

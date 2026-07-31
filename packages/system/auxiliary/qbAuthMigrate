@@ -1,0 +1,352 @@
+#!/bin/bash
+#
+# QuickBox auth migration helper
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+MODE="migrate"
+TARGET_GLOB="/etc/nginx/apps/*.conf"
+PROVIDER="auto"
+BACKUP_SUFFIX=".bak-auth"
+
+usage() {
+  cat <<'EOF'
+Usage: qbAuthMigrate [--migrate|--restore] [--provider <auto|vouch|authelia>] [--glob <nginx-conf-glob>]
+
+Options:
+  --migrate              Convert auth_basic protected app locations to gateway auth_request
+  --restore              Restore files from .bak-auth (or legacy .bak-vouch) backups;
+                         if no backup exists, reconstruct auth_basic from in-file metadata
+  --provider <name>      Auth provider: auto, vouch, authelia (default: auto)
+  --glob <pattern>       Target nginx conf glob (default: /etc/nginx/apps/*.conf)
+  -h, --help             Show this help message
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --migrate)
+      MODE="migrate"
+      ;;
+    --restore)
+      MODE="restore"
+      ;;
+    --provider)
+      PROVIDER="$2"
+      shift
+      ;;
+    --glob)
+      TARGET_GLOB="$2"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown arg: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+if [[ "$PROVIDER" == "auto" ]]; then
+  if [[ -f /install/.authelia.lock ]]; then
+    PROVIDER="authelia"
+  elif [[ -f /install/.vouchproxy.lock ]]; then
+    PROVIDER="vouch"
+  else
+    PROVIDER="vouch"
+  fi
+fi
+
+case "$PROVIDER" in
+  vouch|authelia)
+    ;;
+  *)
+    echo "Invalid --provider value: $PROVIDER" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
+
+DEFAULT_BASIC_AUTHPATH="/etc/htpasswd"
+if [[ -f /root/.admin.info ]]; then
+  admin_user="$(cut -d: -f1 /root/.admin.info || true)"
+  if [[ -n "${admin_user}" && -f "/etc/htpasswd.d/htpasswd.${admin_user}" ]]; then
+    DEFAULT_BASIC_AUTHPATH="/etc/htpasswd.d/htpasswd.${admin_user}"
+  fi
+fi
+
+migrate_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+
+  local has_basic=0
+  local has_gateway=0
+  if grep -q "auth_basic_user_file" "$file"; then
+    has_basic=1
+  fi
+  if grep -Eq 'auth_request[[:space:]]+/(validate|authelia/authz);|auth_request_set[[:space:]]+\$remote_user[[:space:]]+\$qb_(vouch|authelia)_local_user;|proxy_pass[[:space:]]+https?://\$remote_user\.' "$file"; then
+    has_gateway=1
+  fi
+  if [[ $has_basic -eq 0 && $has_gateway -eq 0 ]]; then
+    return 0
+  fi
+
+  # Files marked with qb-auth-lock: basic are intentionally basic-auth-only
+  # (e.g. h5ai with non-admin --auth users) — skip gateway migration.
+  if grep -q '# qb-auth-lock: basic' "$file"; then
+    return 0
+  fi
+
+  # Backup file before modifying
+  if [[ ! -f "${file}${BACKUP_SUFFIX}" ]]; then
+    cp -f "$file" "${file}${BACKUP_SUFFIX}"
+  fi
+
+  local auth_request_path
+  local signin_location
+  local upstream_header
+  local local_user_var
+  local use_modern_redirect
+  if [[ "$PROVIDER" == "authelia" ]]; then
+    auth_request_path="/authelia/authz"
+    signin_location="@qb_authelia_signin"
+    upstream_header="remote_user"
+    local_user_var="qb_authelia_local_user"
+    use_modern_redirect="1"
+  else
+    auth_request_path="/validate"
+    signin_location="@qb_vouch_signin"
+    upstream_header="x_vouch_user"
+    local_user_var="qb_vouch_local_user"
+    use_modern_redirect="0"
+  fi
+
+  # Use Python to process the file block-by-block:
+  # - Insert auth_request directives only in location blocks that had auth_basic
+  # - Add proxy_set_header for proxy blocks
+  # - Remove auth_basic and auth_basic_user_file lines
+  # - Append PHP auth params right after each fastcgi_param SCRIPT_FILENAME line
+  python3 - "$file" "$auth_request_path" "$signin_location" "$upstream_header" "$local_user_var" "$use_modern_redirect" <<'PYEOF'
+import re
+import sys
+
+path = sys.argv[1]
+auth_request_path = sys.argv[2]
+signin_location = sys.argv[3]
+upstream_header = sys.argv[4]
+local_user_var = sys.argv[5]
+use_modern_redirect = sys.argv[6] == '1'
+
+LOCATION_RE = re.compile(r'\s*location\s')
+AUTH_REQUEST_RE = re.compile(r'auth_request\s+/(?:validate|authelia/authz);')
+AUTH_BASIC_USER_FILE_RE = re.compile(r'\s*auth_basic_user_file\s+([^;]+);')
+AUTH_BASIC_USER_FILE_LINE_RE = re.compile(r'\s*auth_basic_user_file\s')
+AUTH_BASIC_RE = re.compile(r'\s*auth_basic\s')
+REMOTE_USER_SET_RE = re.compile(r'\s*auth_request_set\s+\$remote_user\s+\$qb_(?:vouch|authelia)_local_user;')
+REMOTE_USER_PROXY_PASS_RE = re.compile(r'(proxy_pass\s+https?://)\$remote_user(\.)')
+FASTCGI_USER_RE = re.compile(r'\s*fastcgi_param\s+(?:REMOTE_USER|AUTH_USER)\s+\\?\$qb_(?:vouch|authelia)_local_user;')
+FASTCGI_SCRIPT_FILENAME_RE = re.compile(r'\s*fastcgi_param\s+SCRIPT_FILENAME\b')
+INDENT_RE = re.compile(r'^(\s*)')
+
+with open(path, encoding='utf-8') as f:
+  lines = f.readlines()
+
+def read_location_block(start_idx):
+  block = [lines[start_idx]]
+  i = start_idx + 1
+  depth = lines[start_idx].count('{') - lines[start_idx].count('}')
+  while i < len(lines) and depth > 0:
+    block.append(lines[i])
+    depth += lines[i].count('{') - lines[i].count('}')
+    i += 1
+  return block, i
+
+out = []
+i = 0
+while i < len(lines):
+  line = lines[i]
+  if not LOCATION_RE.match(line):
+    out.append(line)
+    i += 1
+    continue
+
+  block, i = read_location_block(i)
+  block_text = ''.join(block)
+  had_basic = 'auth_basic_user_file' in block_text
+  has_gateway = bool(AUTH_REQUEST_RE.search(block_text))
+
+  if had_basic and not has_gateway:
+    indent = '  '
+    basic_auth_path = '/etc/htpasswd'
+    for bl in block:
+      m = AUTH_BASIC_USER_FILE_RE.match(bl)
+      if m:
+        basic_auth_path = m.group(1).strip()
+        break
+
+    inject = [
+      indent + f'# qb-auth-basic-user-file: {basic_auth_path}\n',
+      indent + f'auth_request {auth_request_path};\n',
+    ]
+    if use_modern_redirect:
+      inject.append(indent + 'auth_request_set $redirection_url $upstream_http_location;\n')
+      inject.append(indent + 'error_page 401 =302 $redirection_url;\n')
+    else:
+      inject.append(indent + f'error_page 401 = {signin_location};\n')
+    inject.extend([
+      indent + f'auth_request_set $auth_resp_{upstream_header} $upstream_http_{upstream_header};\n',
+      indent + f'proxy_set_header X-Forwarded-User ${local_user_var};\n',
+    ])
+
+    with_injected = []
+    for bl in block:
+      if AUTH_BASIC_USER_FILE_LINE_RE.match(bl):
+        with_injected.extend(inject)
+      with_injected.append(bl)
+    block = with_injected
+
+  for bl in block:
+    if AUTH_BASIC_RE.match(bl) or AUTH_BASIC_USER_FILE_LINE_RE.match(bl):
+      continue
+    if REMOTE_USER_SET_RE.match(bl):
+      continue
+    if FASTCGI_USER_RE.match(bl):
+      continue
+    bl = REMOTE_USER_PROXY_PASS_RE.sub(lambda m: m.group(1) + '$' + local_user_var + m.group(2), bl)
+    out.append(bl)
+    if FASTCGI_SCRIPT_FILENAME_RE.match(bl):
+      indent = INDENT_RE.match(bl).group(1)
+      out.append(indent + f'fastcgi_param REMOTE_USER ${local_user_var};\n')
+      out.append(indent + f'fastcgi_param AUTH_USER ${local_user_var};\n')
+
+with open(path, 'w', encoding='utf-8') as f:
+  f.writelines(out)
+PYEOF
+}
+
+restore_fallback_basic_file() {
+  local file="$1"
+  local fallback_basic_path="$2"
+
+  python3 - "$file" "$fallback_basic_path" <<'PYEOF'
+import re
+import sys
+
+path = sys.argv[1]
+fallback_basic_path = sys.argv[2]
+
+LOCATION_RE = re.compile(r'\s*location\s')
+AUTH_REQUEST_RE = re.compile(r'auth_request\s+/(?:validate|authelia/authz);')
+LOCAL_USER_REF_RE = re.compile(r'\\?\$qb_(?:vouch|authelia)_local_user')
+BASIC_PATH_COMMENT_RE = re.compile(r'^\s*#\s*qb-auth-basic-user-file:\s*(.+?)\s*$', re.M)
+AUTH_REQUEST_INDENT_RE = re.compile(r'^(\s*)auth_request\s+/(?:validate|authelia/authz);\s*$', re.M)
+REMOVE_LINE_PATTERNS = [
+  re.compile(r'\s*#\s*qb-auth-mode:'),
+  re.compile(r'\s*#\s*qb-auth-basic-user-file:'),
+  re.compile(r'\s*auth_request\s+/(?:validate|authelia/authz);'),
+  re.compile(r'\s*error_page\s+401\s*=\s*(?:302\s+\$redirection_url|@qb_(?:vouch|authelia)_signin);'),
+  re.compile(r'\s*auth_request_set\s+\$auth_resp_[^\s]+\s+\$upstream_http_[^\s]+;'),
+  re.compile(r'\s*auth_request_set\s+\$remote_user\s+\$qb_(?:vouch|authelia)_local_user;'),
+  re.compile(r'\s*auth_request_set\s+\$redirection_url\s+\$upstream_http_location;'),
+  re.compile(r'\s*proxy_set_header\s+X-Forwarded-User\s+\\?\$qb_(?:vouch|authelia)_local_user;'),
+  re.compile(r'\s*fastcgi_param\s+(?:REMOTE_USER|AUTH_USER)\s+\\?\$qb_(?:vouch|authelia)_local_user;'),
+]
+AUTH_BASIC_RE = re.compile(r'\s*auth_basic\s+')
+DENY_ALL_RE = re.compile(r'\s*deny\s+all;')
+
+with open(path, encoding='utf-8') as f:
+  lines = f.readlines()
+
+def read_location_block(start_idx):
+  block = [lines[start_idx]]
+  i = start_idx + 1
+  depth = lines[start_idx].count('{') - lines[start_idx].count('}')
+  while i < len(lines) and depth > 0:
+    block.append(lines[i])
+    depth += lines[i].count('{') - lines[i].count('}')
+    i += 1
+  return block, i
+
+out = []
+i = 0
+while i < len(lines):
+  line = lines[i]
+
+  if not LOCATION_RE.match(line):
+    out.append(line)
+    i += 1
+    continue
+
+  block, i = read_location_block(i)
+  block_text = ''.join(block)
+  has_gateway = bool(AUTH_REQUEST_RE.search(block_text) or LOCAL_USER_REF_RE.search(block_text))
+  if not has_gateway:
+    out.extend(block)
+    continue
+
+  m_path = BASIC_PATH_COMMENT_RE.search(block_text)
+  basic_path = m_path.group(1).strip() if m_path else fallback_basic_path
+  m_indent = AUTH_REQUEST_INDENT_RE.search(block_text)
+  indent = m_indent.group(1) if m_indent else '  '
+
+  cleaned = []
+  for bl in block:
+    if any(pattern.match(bl) for pattern in REMOVE_LINE_PATTERNS):
+      continue
+    cleaned.append(bl)
+
+  if not any(AUTH_BASIC_RE.match(bl) for bl in cleaned):
+    insert_at = None
+    for idx, bl in enumerate(cleaned):
+      if DENY_ALL_RE.match(bl):
+        insert_at = idx + 1
+        break
+
+    if insert_at is None:
+      insert_at = 1 if len(cleaned) > 1 else len(cleaned)
+
+    cleaned[insert_at:insert_at] = [
+      indent + 'auth_basic "Password Required";\n',
+      indent + f'auth_basic_user_file {basic_path};\n',
+    ]
+
+  out.extend(cleaned)
+
+with open(path, 'w', encoding='utf-8') as f:
+  f.writelines(out)
+PYEOF
+}
+
+restore_file() {
+  local file="$1"
+  local backup="${file}${BACKUP_SUFFIX}"
+  local legacy_backup="${file}.bak-vouch"
+
+  if [[ -f "$backup" ]]; then
+    cp -f "$backup" "$file"
+  elif [[ -f "$legacy_backup" ]]; then
+    cp -f "$legacy_backup" "$file"
+  else
+    restore_fallback_basic_file "$file" "$DEFAULT_BASIC_AUTHPATH"
+  fi
+}
+
+shopt -s nullglob
+for file in $TARGET_GLOB; do
+  if [[ "$MODE" == "migrate" ]]; then
+    migrate_file "$file"
+  else
+    restore_file "$file"
+  fi
+done
+
+if command -v nginx >/dev/null 2>&1; then
+  nginx -t >/dev/null 2>&1 && nginx -s reload >/dev/null 2>&1 || true
+fi

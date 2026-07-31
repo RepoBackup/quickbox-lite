@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Maintainer:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # Author:           Mischief
 # Credits to:       QuickBox.io
 #
@@ -189,8 +189,7 @@ location ~ /netdata/(?<ndpath>.*) {
     proxy_set_header Connection "keep-alive";
     proxy_store off;
     proxy_pass http://unix:/run/netdata/netdata.sock:/\$ndpath\$is_args\$args;
-    auth_basic "Password Required";
-    auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.${username}" "    ")
     gzip on;
     gzip_proxied any;
     gzip_types *;

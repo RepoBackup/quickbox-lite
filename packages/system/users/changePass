@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -92,9 +92,10 @@ function _usage() {
 # SCRIPT FUNCTIONS
 ################################################################################
 function _checkUser() {
-	userlist=$(cat "$(find /root/.qbuser/ -type f)" | cut -d: -f1)
-	if [[ ! $username =~ $(echo $userlist) ]]; then
-		_error "User not exist !"
+	local admin_user
+	admin_user=$(cat /root/.admin.info | cut -d: -f1)
+	if [[ "$username" != "$admin_user" ]]; then
+		_error "Only admin user password changes are supported in single-user mode."
 		exit 1
 	fi
 }
@@ -111,6 +112,110 @@ function _checkPass() {
 			exit 1
 		fi
 	fi
+}
+
+function _generateAutheliaPasswordHash() {
+	local plain_password=$1
+	local digest
+
+	digest=$(
+		docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password "$plain_password" 2>>"${OUTTO}" |
+			awk -F': ' '/^Digest: / {print $2}'
+	)
+
+	if [[ -z "$digest" ]]; then
+		return 1
+	fi
+
+	printf "%s" "$digest"
+}
+
+function _updateAutheliaPassword() {
+	local authelia_hash
+
+	if [[ ! -f /install/.authelia.lock ]]; then
+		return 0
+	fi
+
+	if [[ ! -f /opt/authelia/users_database.yml ]]; then
+		_error "Authelia is installed but /opt/authelia/users_database.yml is missing."
+		return 1
+	fi
+
+	_info "Updating Authelia password"
+	authelia_hash="$(_generateAutheliaPasswordHash "$password")"
+	if [[ -z "$authelia_hash" ]]; then
+		_error "Failed to generate Authelia password hash."
+		return 1
+	fi
+
+	if ! python3 - "$username" "$authelia_hash" <<'PYEOF'
+from pathlib import Path
+import re
+import sys
+
+username = sys.argv[1]
+new_hash = sys.argv[2]
+path = Path('/opt/authelia/users_database.yml')
+lines = path.read_text().splitlines()
+
+users_start = None
+for idx, line in enumerate(lines):
+    if re.match(r'^users:\s*$', line):
+        users_start = idx
+        break
+
+if users_start is None:
+    raise SystemExit('users section not found')
+
+users_end = len(lines)
+for idx in range(users_start + 1, len(lines)):
+    line = lines[idx]
+    if line.strip() == '' or line.lstrip().startswith('#'):
+        continue
+    if len(line) - len(line.lstrip(' ')) == 0:
+        users_end = idx
+        break
+
+user_pattern = re.compile(r'^\s{2}' + re.escape(username) + r':\s*$')
+user_start = None
+for idx in range(users_start + 1, users_end):
+    if user_pattern.match(lines[idx]):
+        user_start = idx
+        break
+
+if user_start is None:
+    raise SystemExit('user entry not found')
+
+user_end = users_end
+for idx in range(user_start + 1, users_end):
+    if re.match(r'^\s{2}[^\s#][^:]*:\s*$', lines[idx]):
+        user_end = idx
+        break
+
+password_idx = None
+for idx in range(user_start + 1, user_end):
+    if re.match(r'^\s{4}password:\s*.*$', lines[idx]):
+        password_idx = idx
+        break
+
+if password_idx is None:
+    raise SystemExit('password field not found for user')
+
+lines[password_idx] = f'    password: "{new_hash}"'
+path.write_text('\n'.join(lines) + '\n')
+PYEOF
+	then
+		_error "Failed to update Authelia users database."
+		return 1
+	fi
+
+	if ! _execute "systemctl restart authelia"; then
+		_error "Failed to restart Authelia service."
+		return 1
+	fi
+
+	_success "Authelia password updated"
 }
 
 function _chPasswd() {
@@ -131,11 +236,15 @@ function _chPasswd() {
 		echo "${passphrase}" >/root/.ssh/local_user
 		chmod 600 /root/.ssh/local_user && chmod 700 /root/.ssh
 	fi
-	if [[ $username == "$(cat /root/.admin.info | cut -d: -f1)" ]]; then
-		echo "${username}:$(echo ${password} | openssl enc -aes-128-ecb -pbkdf2 -a -e -pass pass:${passphrase} -nosalt)" >/root/.admin.info
+	echo "${username}:$(echo ${password} | openssl enc -aes-128-ecb -pbkdf2 -a -e -pass pass:${passphrase} -nosalt)" >/root/.admin.info
+	# Keep legacy metadata updated only when old multi-user files are still present.
+	if [[ -d /root/.qbuser ]]; then
+		echo "${username}:$(echo ${password} | openssl enc -aes-128-ecb -pbkdf2 -a -e -pass pass:${passphrase} -nosalt)" >/root/.qbuser/${username}.info
 	fi
-	echo "${username}:$(echo ${password} | openssl enc -aes-128-ecb -pbkdf2 -a -e -pass pass:${passphrase} -nosalt)" >/root/.qbuser/${username}.info
 	_success "User info updated"
+	if ! _updateAutheliaPassword; then
+		exit 1
+	fi
 
 	# Update application password
 	if [[ -f /install/.samba.lock ]]; then

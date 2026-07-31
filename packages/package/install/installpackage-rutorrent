@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -71,6 +71,14 @@ APP_PHPDEPS="php8.4-cli php8.4-fpm php8.4-curl php8.4-gd php8.4-mbstring php8.4-
 
 APP_LOCK=.$APP_NAME.lock
 OUTTO=/srv/dashboard/db/output.log
+APP_AUTH_FILE="/etc/htpasswd"
+
+if [[ -f /root/.admin.info ]]; then
+	admin_user=$(cut -d: -f1 /root/.admin.info)
+	if [[ -n "${admin_user}" ]]; then
+		APP_AUTH_FILE="/etc/htpasswd.d/htpasswd.${admin_user}"
+	fi
+fi
 
 BRANCH="https://github.com/Novik/ruTorrent.git"
 
@@ -498,14 +506,13 @@ TAS
 location /rutorrent {
   alias /srv/rutorrent;
   include /etc/nginx/snippets/proxy.conf;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.\$remote_user;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "${APP_AUTH_FILE}" "  ")
 
-  location ~ \.php$
-  {
+  location ~ \.php$ {
     fastcgi_read_timeout 240;
     fastcgi_pass  unix:/run/php/php8.4-fpm.sock;
     include snippets/fastcgi-php.conf;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth fastcgi "${APP_AUTH_FILE}" "    ")
     fastcgi_param SCRIPT_FILENAME /srv\$fastcgi_script_name;
   }
 }

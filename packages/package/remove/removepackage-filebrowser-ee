@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -116,11 +116,10 @@ Please wait until the process is completed
 
 function _removeService() {
 	_info "Removing ${APP_TITLE} service..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		_execute "systemctl disable ${APP_SERVICE}@${username}"
-		_execute "systemctl stop ${APP_SERVICE}@${username}"
-	done
+	local username
+	username=$(cut -d: -f1 /root/.admin.info)
+	_execute "systemctl disable ${APP_SERVICE}@${username}"
+	_execute "systemctl stop ${APP_SERVICE}@${username}"
 	rm -rf /etc/systemd/system/${APP_SERVICE}@.service >/dev/null 2>&1
 	_execute "systemctl daemon-reload"
 	_success "${APP_TITLE} service removed."
@@ -140,14 +139,13 @@ function _removeDepends() {
 
 function _removeApp() {
 	_info "Removing ${APP_TITLE}..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		rm -rf /home/${username}/.config/filebrowser-ee/
-		rm -f /etc/nginx/conf.d/${username}.${APP_NAME}.conf
-		rm -f /install/${username}.${APP_NAME}.port >/dev/null 2>&1
-		_execute "docker stop filebrowser-ee-${username}"
-		_execute "docker rm filebrowser-ee-${username}"
-	done
+	local username
+	username=$(cut -d: -f1 /root/.admin.info)
+	rm -rf /home/${username}/.config/filebrowser-ee/
+	rm -f /etc/nginx/conf.d/filebrowser-ee.conf
+	rm -f /install/${username}.${APP_NAME}.port >/dev/null 2>&1
+	_execute "docker stop filebrowser-ee-${username}"
+	_execute "docker rm filebrowser-ee-${username}"
 	if [ ! -f /install/.filebrowser.lock ]; then
 		rm -f /usr/local/bin/filebrowser >/dev/null 2>&1
 	fi

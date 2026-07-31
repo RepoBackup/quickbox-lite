@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Maintainer:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # Author:           Mischief
 # Credits to:       QuickBox.io
 #
@@ -263,8 +263,7 @@ location /vnc {
   index vnc.html;
   alias /srv/novnc/;
   try_files \$uri \$uri/ /vnc.html;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.${username}" "  ")
 }
 EOF
 

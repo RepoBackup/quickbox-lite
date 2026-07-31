@@ -1,3 +1,33 @@
+## CHANGELOG v1.6.1
+
+*Changelog update Sunday, Jul 26, 2026*
+
+### General additions
+
+- Add Authelia as a dashboard auth provider package
+- Add installer auth provider selection for none, Authelia, or Vouch Proxy
+- Add kickstart config mode for local JSON files and HTTPS config URLs, plus config generation and summary skipping
+
+### Important changes
+
+- Add provider-aware Nginx auth migration through `qbAuthMigrate --provider <auto|vouch|authelia>` and the new `qbNginxAuth` helper
+- Apply auth gateway migration across supported package installers while preserving basic-auth-locked h5ai configurations
+- Update password changes to sync Authelia's user database when Authelia is installed
+
+### Function improved
+
+- Support Authelia password, MFA, and passwordless modes, including SMTP/email configuration where required
+- Improve Vouch Proxy with localhost binding, `www-data` runtime, logout/end-session support, email domain allowlists, OIDC user mapping, and safer endpoint/domain validation
+- Expose external auth state and SSO logout behavior in the dashboard
+
+### Function updated
+
+- Let CLI options override kickstart config values while package flags remain additive
+- Normalize setup validation for usernames, passwords, ports, source/theme values, CDN mapping, and domain/certificate variables
+- Use explicit `.conf` suffixes for Nginx includes
+
+---
+
 ## CHANGELOG v1.6.0
 
 *Changelog update Saturday, Jul 04, 2026*

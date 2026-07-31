@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -214,8 +214,7 @@ function _configureApp() {
 	cat >/etc/nginx/apps/${username}.ovpn.conf<<EOF
 location /${username}/ovpn.zip {
   alias /home/${username}/openvpn/${username}.zip;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.${username}" "  ")
   autoindex on;
 }
 EOF

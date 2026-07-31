@@ -10,6 +10,8 @@
 
 该项目是 QuickBox 社区版的 mod. 主要目的是创建一个轻量级的 QuickBox 套件。大部分 QuickBox 社区版的功能都将被保留，但是只有最为常用的第三方软件会被加入这个项目。同时这个项目会提供一些预编译的 BT 客户端来减少安装时间，同时降低对 CPU 的要求。大多数的软件会以模块的形式存在，QuickBox 面板不再依赖 ruTorrent，可以自由选择各种客户端，这也是该项目称为 Lite 的原因。
 
+[更多信息参见 Wiki](https://cn.wiki.ptbox.dev/)
+
 ---
 
 ## 主要特性
@@ -24,7 +26,7 @@
 
 ## 当前版本
 
-![Version](https://img.shields.io/badge/version-1.5.12-orange?style=flat-square)![GNU v3.0 License](https://img.shields.io/badge/license-GNU%20v3.0%20License-blue.svg?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.6.1-orange?style=flat-square)![GNU v3.0 License](https://img.shields.io/badge/license-GNU%20v3.0%20License-blue.svg?style=flat-square)
 
 在执行 1.3.2 -> 1.3.3 的升级时，建议使用 SSH 运行  `box update quickbox` 进行升级操作，且需要执行两次以完成后台服务升级。若使用 WebUI 也需要执行两次。
 
@@ -46,7 +48,7 @@
 
 ![Ubuntu24.04](https://img.shields.io/badge/Ubuntu%2024.04-passing-brightgreen.svg?style=flat-square)![Ubuntu22.04](https://img.shields.io/badge/Ubuntu%2022.04-passing-brightgreen.svg?style=flat-square)![Ubuntu20.04](https://img.shields.io/badge/Ubuntu%2020.04-passing-brightgreen.svg?style=flat-square)![Ubuntu18.04](https://img.shields.io/badge/Ubuntu%2018.04-EOL-red.svg?style=flat-square)![Ubuntu16.04](https://img.shields.io/badge/Ubuntu%2016.04-EOL-red.svg?style=flat-square)
 
-![Debian12](https://img.shields.io/badge/Debian%2013-passing-brightgreen.svg?style=flat-square)![Debian12](https://img.shields.io/badge/Debian%2012-passing-brightgreen.svg?style=flat-square)![Debian11](https://img.shields.io/badge/Debian%2011-passing-brightgreen.svg?style=flat-square)![Debian10](https://img.shields.io/badge/Debian%2010-EOL-red.svg?style=flat-square)![Debian9](https://img.shields.io/badge/Debian%209-EOL-red.svg?style=flat-square)
+![Debian13](https://img.shields.io/badge/Debian%2013-passing-brightgreen.svg?style=flat-square)![Debian12](https://img.shields.io/badge/Debian%2012-passing-brightgreen.svg?style=flat-square)![Debian11](https://img.shields.io/badge/Debian%2011-passing-brightgreen.svg?style=flat-square)![Debian10](https://img.shields.io/badge/Debian%2010-EOL-red.svg?style=flat-square)![Debian9](https://img.shields.io/badge/Debian%209-EOL-red.svg?style=flat-square)
 
 服务器支持:
 
@@ -105,19 +107,43 @@ QuickBox Lite Setup Script
   --with-cf                        使用 cloudflare 替代 github
   --with-sf                        使用 sourceforge 替代 github
   --with-osdn                      使用 osdn(jp) 替代 github
-  --with-github                    使用 github
+  --with-github                    使用 github  
+  --auth-provider <none|authelia|vouchproxy>
+                                   选择仪表盘身份验证提供者（默认 none）
+  --auth-mode <password|mfa|passwordless>
+                                   选择 Authelia 身份验证模式（默认密码）
+  --admin-email <email>            Authelia 管理员邮箱
+  --smtp-host <host>               Authelia SMTP 主机
+  --smtp-port <port>               Authelia SMTP 端口
+  --smtp-username <user>           Authelia SMTP 用户名
+  --smtp-password <password>       Authelia SMTP 密码
+  --smtp-sender <email>            Authelia SMTP 发件人邮箱
+  
+  --oidc-auth-url <url>            Vouch Proxy OIDC 授权 URL
+  --oidc-token-url <url>           Vouch Proxy OIDC 令牌 URL
+  --oidc-userinfo-url <url>        Vouch Proxy OIDC 用户信息 URL
+  --oidc-client-id <id>            Vouch Proxy OIDC 客户端 ID
+  --oidc-client-secret <secret>    Vouch Proxy OIDC 客户端密钥
+  --oidc-end-session-endpoint <url>
+                                   Vouch Proxy 可选的登出端点
+  --oidc-user <user>               允许访问本地管理员的 OIDC 用户
+  --oidc-user-map <csv>            OIDC 用户名映射到本地管理员
+  --oidc-email-domains <csv>       允许的 OIDC 邮箱域名
+  
   --with-APPNAME                   安装一个 app
   --qbittorrent-version            指定 qBittorrent 版本
   --deluge-version                 指定 Deluge 版本
   --qbit-libt-version              指定用于 qBittorrent 的 Libtorrent 版本
   --de-libt-version                指定用于 Deluge 的 Libtorrent 版本
   --rtorrent-version               指定 rTorrent 版本
+  --transmission-version           指定 Transmission 版本
 
     可选的 APP:
     rtorrent | rutorrent | flood | transmission | qbittorrent
     deluge | mktorrent | ffmpeg | filebrowser | linuxrar
 
   -h, --help                       显示该帮助文档并退出
+
 ```
 
 用户名和密码是必须填写的参数，否则仍然会启动 TUI 安装界面。其他可选参数的功能与 TUI 安装界面相同。下面是一个使用示例：

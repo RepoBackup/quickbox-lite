@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -76,6 +76,14 @@ APP_PHPDEPS="php8.4-fpm"
 
 APP_LOCK=.$APP_NAME.lock
 OUTTO=/srv/dashboard/db/output.log
+APP_AUTH_FILE="/etc/htpasswd"
+
+if [[ -f /root/.admin.info ]]; then
+	admin_user=$(cut -d: -f1 /root/.admin.info)
+	if [[ -n "${admin_user}" ]]; then
+		APP_AUTH_FILE="/etc/htpasswd.d/htpasswd.${admin_user}"
+	fi
+fi
 
 ################################################################################
 # SCRIPT FUNCTIONS
@@ -231,27 +239,24 @@ function _installApp() {
 function _configureApp() {
 	_info "Configuring ${APP_TITLE}..."
 	sed -i "s/SAME_IP_MULTI_LOGS = false/SAME_IP_MULTI_LOGS = true/g" /srv/speedtest/backend/config.php
-	cat >/etc/nginx/apps/librespeed.conf <<'EOF'
+	cat >/etc/nginx/apps/librespeed.conf <<EOF
 location /speedtest {
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "${APP_AUTH_FILE}" "  ")
   alias /srv/speedtest;
   index index.html;
   gzip off;
 }
 
 location /speedtest/ip {
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "${APP_AUTH_FILE}" "  ")
   default_type text/plain;
   add_header 'Access-Control-Allow-Origin' '*' always;
-  return 200 "${remote_addr}";
+	return 200 "\${remote_addr}";
   gzip off;
 }
 
 location /speedtest/empty {
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "${APP_AUTH_FILE}" "  ")
   client_max_body_size 20M;
   add_header 'Access-Control-Allow-Origin' '*' always;
   add_header 'Access-Control-Allow-Headers' 'Content-Encoding';
@@ -262,11 +267,10 @@ location /speedtest/empty {
 
 
 location ~ ^/speedtest/backend/(?P<path>.+\.php)$ {
-	auth_basic "Password Required";
-	auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
+	$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth fastcgi "${APP_AUTH_FILE}" "	")
 	include snippets/fastcgi-php.conf;
 	fastcgi_pass unix:/run/php/php8.4-fpm.sock;
-	fastcgi_param SCRIPT_FILENAME /srv/speedtest/backend/$path;
+	fastcgi_param SCRIPT_FILENAME /srv/speedtest/backend/\$path;
 }
 EOF
 	_execute "nginx -s reload"

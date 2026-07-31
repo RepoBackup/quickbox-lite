@@ -24,7 +24,7 @@ This project is a modified version of the QuickBox community edition. This proje
 
 ## Script status
 
-![Version](https://img.shields.io/badge/version-1.5.12-orange?style=flat-square)![GNU v3.0 License](https://img.shields.io/badge/license-GNU%20v3.0%20License-blue.svg?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.6.1-orange?style=flat-square)![GNU v3.0 License](https://img.shields.io/badge/license-GNU%20v3.0%20License-blue.svg?style=flat-square)
 
 When upgrade from 1.3.2 to 1.3.3, very recommend to use SSH with `box update quickbox`. You also need to run the command twice to finish the service upgrade. If you are using WebUI to finish the upgrade, please also upgrade twice.
 
@@ -46,7 +46,9 @@ OS Support (amd64 only):
 
 ![Ubuntu24.04](https://img.shields.io/badge/Ubuntu%2024.04-passing-brightgreen.svg?style=flat-square)![Ubuntu22.04](https://img.shields.io/badge/Ubuntu%2022.04-passing-brightgreen.svg?style=flat-square)![Ubuntu20.04](https://img.shields.io/badge/Ubuntu%2020.04-passing-brightgreen.svg?style=flat-square)![Ubuntu18.04](https://img.shields.io/badge/Ubuntu%2018.04-EOL-red.svg?style=flat-square)![Ubuntu16.04](https://img.shields.io/badge/Ubuntu%2016.04-EOL-red.svg?style=flat-square)
 
-![Debian12](https://img.shields.io/badge/Debian%2013-passing-brightgreen.svg?style=flat-square)![Debian12](https://img.shields.io/badge/Debian%2012-passing-brightgreen.svg?style=flat-square)![Debian11](https://img.shields.io/badge/Debian%2011-passing-brightgreen.svg?style=flat-square)![Debian10](https://img.shields.io/badge/Debian%2010-EOL-red.svg?style=flat-square)![Debian9](https://img.shields.io/badge/Debian%209-EOL-red.svg?style=flat-square)
+![Debian13](https://img.shields.io/badge/Debian%2013-passing-brightgreen.svg?style=flat-square)![Debian12](https://img.shields.io/badge/Debian%2012-passing-brightgreen.svg?style=flat-square)![Debian11](https://img.shields.io/badge/Debian%2011-passing-brightgreen.svg?style=flat-square)![Debian10](https://img.shields.io/badge/Debian%2010-EOL-red.svg?style=flat-square)![Debian9](https://img.shields.io/badge/Debian%209-EOL-red.svg?style=flat-square)
+
+Currently supported targets: Ubuntu 20.04/22.04/24.04 and Debian 11/12/13 (amd64).
 
 Server Support:
 
@@ -91,6 +93,7 @@ Options:
 
   -d, --domain <domain>            setup domain for server
   -H, --hostname <hostname>        setup hostname, make no change by default
+  -c, --config <file|url>          load installer settings from local JSON or remote config URL
   -P, --port <1-65535>             setup ssh service port, use 4747 by default
   -u, --username <username*>       username is required here
   -p, --password <password*>       your password is required here
@@ -108,7 +111,30 @@ Options:
   --with-cf                        use cloudflare instead of github
   --with-sf                        use sourceforge instead of github
   --with-osdn                      use osdn(jp)  instead of github
-  --with-github                    use github
+  --allow-http-config              allow remote config over HTTP for trusted local/test use
+  --generate-config                generate a kickstart config instead of installing
+  --config-output <file>           write generated kickstart config to this file
+  --skip-summary                   skip the final setup summary before install
+  --auth-provider <none|authelia|vouchproxy>
+                                   choose dashboard auth provider
+  --auth-mode <password|mfa|passwordless>
+                                   choose Authelia auth mode
+  --admin-email <email>            Authelia admin email
+  --smtp-host <host>               Authelia SMTP host
+  --smtp-port <port>               Authelia SMTP port
+  --smtp-username <user>           Authelia SMTP username
+  --smtp-password <password>       Authelia SMTP password
+  --smtp-sender <email>            Authelia SMTP sender email
+  --oidc-auth-url <url>            Vouch Proxy OIDC authorize URL
+  --oidc-token-url <url>           Vouch Proxy OIDC token URL
+  --oidc-userinfo-url <url>        Vouch Proxy OIDC userinfo URL
+  --oidc-client-id <id>            Vouch Proxy OIDC client id
+  --oidc-client-secret <secret>    Vouch Proxy OIDC client secret
+  --oidc-end-session-endpoint <url>
+                                   Vouch Proxy optional logout endpoint
+  --oidc-user <user>               OIDC user allowed to access local admin
+  --oidc-user-map <csv>            OIDC usernames mapped to local admin
+  --oidc-email-domains <csv>       allowed OIDC email domains
   --with-APPNAME                   install an application
   --qbittorrent-version            specify the qBittorrent version
   --deluge-version                 specify the Deluge version

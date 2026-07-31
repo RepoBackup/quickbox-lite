@@ -32,7 +32,52 @@ function _updatedashboard() {
 	_execute "rsync -aP --delete --exclude=output.log  --exclude=interface.txt --exclude=master.txt --exclude=.smoked.lock --exclude=.defaulted.lock --exclude=custom.css ${local_setup_dashboard}* /srv/dashboard"
 	username=$(cat /root/.admin.info | cut -d: -f1)
 	\cp -f ${local_setup_template}nginx/dashboard.conf.template /etc/nginx/apps/dashboard.conf
-	sed -i "s/\/etc\/htpasswd/\/etc\/htpasswd.d\/htpasswd.${username}/g" /etc/nginx/apps/dashboard.conf
+	python3 - "/etc/nginx/apps/dashboard.conf" "/etc/htpasswd.d/htpasswd.${username}" <<'PYEOF'
+import re
+import subprocess
+import sys
+
+path = sys.argv[1]
+htpasswd_path = sys.argv[2]
+
+
+def auth_snippet(mode: str) -> list[str]:
+	output = subprocess.check_output(
+		["bash", "/usr/local/bin/quickbox/system/auxiliary/qbNginxAuth", mode, htpasswd_path, "    "],
+		text=True,
+	)
+	return [line + "\n" for line in output.rstrip("\n").split("\n") if line]
+
+
+with open(path, encoding="utf-8") as f:
+	lines = f.readlines()
+
+plain_auth = auth_snippet("plain")
+proxy_auth = auth_snippet("proxy")
+location_path = ""
+out = []
+i = 0
+
+while i < len(lines):
+	line = lines[i]
+	location_match = re.match(r"\s*location\s+(?:[=~*^~]+\s+)?(\S+)\s*\{", line)
+	if location_match:
+		location_path = location_match.group(1)
+
+	out.append(line)
+	i += 1
+
+	if re.match(r"\s*deny\s+all;", line):
+		while i < len(lines) and re.match(r"\s*auth_basic(?:_user_file)?\b", lines[i]):
+			i += 1
+		if location_path == "/db/":
+			out.extend(plain_auth)
+		else:
+			out.extend(proxy_auth)
+
+with open(path, "w", encoding="utf-8") as f:
+	f.writelines(out)
+PYEOF
 	cd /srv/dashboard/ws || exit 1
 	_execute "npm ci --production"
 	\cp -f ${local_setup_template}systemd/quickbox-ws.service.template /etc/systemd/system/quickbox-ws.service

@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -266,8 +266,18 @@ function _configNginx() {
 location /${subfolder} {
     index  index.html  index.php  /${subfolder}/_h5ai/public/index.php;
     alias ${target};
-    auth_basic "Password Required";
-    auth_basic_user_file /etc/htpasswd.d/htpasswd.h5ai;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.h5ai" "    ")
+
+    location ~ ^/${subfolder}/_h5ai/private/ {
+            return 403;
+    }
+
+    location ~ \.php$ {
+        fastcgi_read_timeout 240;
+        fastcgi_pass  unix:/run/php/php8.4-fpm.sock;
+        include snippets/fastcgi-php.conf;
+        fastcgi_param SCRIPT_FILENAME \$request_filename;
+    }
 }
 EOF
     elif [[ -n "${domain}" ]]; then
@@ -280,8 +290,7 @@ server {
     server_name         ${domain};
     root                ${target};
 
-    auth_basic "Password Required";
-    auth_basic_user_file /etc/htpasswd.d/htpasswd.h5ai;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.h5ai" "    ")
 
     # SSL
     ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
@@ -377,8 +386,7 @@ server {
     server_name         ${domain};
     root                ${target};
 
-    auth_basic "Password Required";
-    auth_basic_user_file /etc/htpasswd.d/htpasswd.h5ai;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.h5ai" "    ")
 
     # SSL
     ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
@@ -477,8 +485,7 @@ server {
     server_name         ${domain};
     root                ${target};
 
-    auth_basic "Password Required";
-    auth_basic_user_file /etc/htpasswd.d/htpasswd.h5ai;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.h5ai" "    ")
 
     # SSL
     ssl_certificate /etc/nginx/ssl/${domain}/${domain}-ssl.pem;
@@ -565,6 +572,15 @@ EOF
         fi
     else
         _error "No vhost or subfolder configurations provided!"
+    fi
+    # When forced to basic auth (--auth / private mode), stamp the nginx conf so
+    # qbAuthMigrate will not upgrade it to gateway auth later.
+    if [[ "${QB_AUTH_PROVIDER:-auto}" == "basic" ]]; then
+        if [[ -n "${subfolder}" ]]; then
+            sed -i '1s/^/# qb-auth-lock: basic\n/' /etc/nginx/apps/h5ai.conf
+        elif [[ -n "${domain}" ]]; then
+            sed -i '1s/^/# qb-auth-lock: basic\n/' /etc/nginx/sites-enabled/h5ai.conf
+        fi
     fi
 }
 
@@ -742,13 +758,19 @@ EOF
             echo "${username}:$(openssl passwd -apr1 "${password}")" >> /etc/htpasswd.d/htpasswd.h5ai
         done
         username=$(cat /root/.admin.info | cut -d: -f1)
-        _configNginx
+        if [[ ${#auth_array[@]} -gt 0 ]]; then
+            QB_AUTH_PROVIDER=basic _configNginx
+        else
+            _configNginx
+        fi
     else
         _configNginx
         if [[ -n "${subfolder}" ]]; then
             sed -i -r 's/(auth_basic|auth_basic_user_file)/#\1/g' /etc/nginx/apps/h5ai.conf
+            sed -i '/auth_request \/validate;/d;/error_page 401 = @qb_vouch_signin;/d;/auth_request_set \$auth_resp_x_vouch_user \$upstream_http_x_vouch_user;/d' /etc/nginx/apps/h5ai.conf
         elif [[ -n "${domain}" ]]; then
             sed -i -r 's/(auth_basic|auth_basic_user_file)/#\1/g' /etc/nginx/sites-enabled/h5ai.conf
+            sed -i '/auth_request \/validate;/d;/error_page 401 = @qb_vouch_signin;/d;/auth_request_set \$auth_resp_x_vouch_user \$upstream_http_x_vouch_user;/d' /etc/nginx/sites-enabled/h5ai.conf
         else
             _error "No vhost or subfolder configurations provided!"
         fi

@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -209,6 +209,8 @@ function _installApp() {
 
 function _configureApp() {
 	_info "Configuring ${APP_TITLE}..."
+	local username
+	username=$(cut -d: -f1 /root/.admin.info)
 
 	if [[ -f /install/.lang_da.lock ]]; then
 		UIlang=en
@@ -224,31 +226,28 @@ function _configureApp() {
 		UIlang=zh-cn
 	fi
 
-	# get userlist
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		# get used port
-		local usedport=""
-		if (find /install/ -type f | grep -q .$APP_NAME.port); then
-			usedport=$(cat $(find /install/ -type f | grep .$APP_NAME.port))
-		fi
-		# generate available port
+	# get used port
+	local usedport=""
+	if (find /install/ -type f | grep -q .$APP_NAME.port); then
+		usedport=$(cat "$(find /install/ -type f | grep .$APP_NAME.port)")
+	fi
+	# generate available port
+	PORT=$(shuf -i ${APP_WEB_PORT_LOW}-${APP_WEB_PORT_HIGH} -n 1)
+	while [[ "$(netstat -ln | grep ':'"$PORT"'' | grep -c 'LISTEN')" -eq "1" || $usedport =~ $PORT ]]; do
 		PORT=$(shuf -i ${APP_WEB_PORT_LOW}-${APP_WEB_PORT_HIGH} -n 1)
-		while [[ "$(netstat -ln | grep ':'"$PORT"'' | grep -c 'LISTEN')" -eq "1" || $usedport =~ $PORT ]]; do
-			PORT=$(shuf -i ${APP_WEB_PORT_LOW}-${APP_WEB_PORT_HIGH} -n 1)
-		done
-		echo "$PORT" >/install/$username.$APP_NAME.port
-		passphrase=$(cat /root/.ssh/local_user)
-		passtext=$(cat /root/.qbuser/${username}.info | cut -d: -f2)
-		password=$(echo ${passtext} | openssl enc -aes-128-ecb -pbkdf2 -a -d -pass pass:${passphrase} -nosalt)
-		_UID=$(id -u ${username})
-		_GID=$(id -g ${username})
-		mkdir -p /home/${username}/.config/filebrowser-ee/
-		mkdir -p /home/${username}/.config/filebrowser-ee/log/
-		chown ${username}:${username} -R /home/${username}/.config/filebrowser-ee/
-		cd /home/${username}/.config/filebrowser-ee/ || exit 1
-		if [[ ${hwaccel} == 1 ]]; then
-			cat >/home/${username}/.config/filebrowser-ee/docker-compose.yml <<EOF
+	done
+	echo "$PORT" >/install/$username.$APP_NAME.port
+	passphrase=$(cat /root/.ssh/local_user)
+	passtext=$(cat /root/.admin.info | cut -d: -f2)
+	password=$(echo ${passtext} | openssl enc -aes-128-ecb -pbkdf2 -a -d -pass pass:${passphrase} -nosalt)
+	_UID=$(id -u ${username})
+	_GID=$(id -g ${username})
+	mkdir -p /home/${username}/.config/filebrowser-ee/
+	mkdir -p /home/${username}/.config/filebrowser-ee/log/
+	chown ${username}:${username} -R /home/${username}/.config/filebrowser-ee/
+	cd /home/${username}/.config/filebrowser-ee/ || exit 1
+	if [[ ${hwaccel} == 1 ]]; then
+		cat >/home/${username}/.config/filebrowser-ee/docker-compose.yml <<EOF
 version: "3.0"  # optional since v1.27.0
 services:
   fb-ee:
@@ -273,8 +272,8 @@ services:
     container_name: filebrowser-ee-${username}
     restart: unless-stopped
 EOF
-		else
-			cat >/home/${username}/.config/filebrowser-ee/docker-compose.yml <<EOF
+	else
+		cat >/home/${username}/.config/filebrowser-ee/docker-compose.yml <<EOF
 version: "3.0"  # optional since v1.27.0
 services:
   fb-ee:
@@ -297,44 +296,42 @@ services:
     container_name: filebrowser-ee-${username}
     restart: unless-stopped
 EOF
-		fi
-		_execute "docker compose up -d"
+	fi
+	_execute "docker compose up -d"
         while [[ ! -f /home/${username}/.config/filebrowser-ee/database.db ]]; do
             sleep 1
         done
-		_execute "docker exec -i filebrowser-ee-${username} cp /config/database.db /config/database-new.db"
-		_execute "docker exec -i filebrowser-ee-${username} filebrowser -d /config/database-new.db config set --locale ${UIlang} --auth.method=noauth --baseurl=\"/filebrowser-ee/\""
-		_execute "docker exec -i filebrowser-ee-${username} filebrowser -d /config/database-new.db users add ${username} ${password} --perm.admin"
+	_execute "docker exec -i filebrowser-ee-${username} cp /config/database.db /config/database-new.db"
+	_execute "docker exec -i filebrowser-ee-${username} filebrowser -d /config/database-new.db config set --locale ${UIlang} --auth.method=noauth --baseurl=\"/filebrowser-ee/\""
+	_execute "docker exec -i filebrowser-ee-${username} filebrowser -d /config/database-new.db users add ${username} ${password} --perm.admin"
         _execute "docker compose down"
         mv /home/${username}/.config/filebrowser-ee/database-new.db /home/${username}/.config/filebrowser-ee/database.db
-		chown ${username}:${username} -R /home/${username}/.config/filebrowser-ee/
+	chown ${username}:${username} -R /home/${username}/.config/filebrowser-ee/
 
-		# Generate reverse proxy upstream
-		cat >/etc/nginx/conf.d/${username}.filebrowser-ee.conf <<EOF
-upstream ${username}.filebrowser-ee {
+	# Generate reverse proxy upstream
+	cat >/etc/nginx/conf.d/filebrowser-ee.conf <<EOF
+upstream filebrowser-ee {
   server 127.0.0.1:${PORT};
 }
 EOF
-	done
 
-	cat >/etc/nginx/apps/filebrowser-ee.conf <<'EOF'
+	cat >/etc/nginx/apps/filebrowser-ee.conf <<EOF
 location /filebrowser-ee {
   return 301 /filebrowser-ee/;
 }
 
 location /filebrowser-ee/ {
   client_max_body_size 0;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
-  rewrite ^/filebrowser-ee/(?P<path>.*) /$path break;
-  proxy_pass http://$remote_user.filebrowser-ee;
+	$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth proxy "/etc/htpasswd.d/htpasswd.${username}" "  ")
+	rewrite ^/filebrowser-ee/(?P<path>.*) /\$path break;
+	proxy_pass http://filebrowser-ee;
   proxy_http_version 1.1;
-  proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Upgrade \$http_upgrade;
   proxy_set_header Connection "upgrade";
-  proxy_set_header Host $host;
+	proxy_set_header Host \$host;
 }
 EOF
-	cat >/etc/systemd/system/filebrowser-ee@${username}.service <<EOF
+	cat >/etc/systemd/system/filebrowser-ee@.service <<'EOF'
 [Unit]
 Description=File Browser Enhanced
 After=docker.service
@@ -343,7 +340,7 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=true
-WorkingDirectory=/home/${username}/.config/filebrowser-ee/
+WorkingDirectory=/home/%i/.config/filebrowser-ee/
 ExecStart=/usr/bin/docker compose up -d --remove-orphans
 ExecStop=/usr/bin/docker compose down
 
@@ -363,11 +360,10 @@ function _installAppLock() {
 
 function _installAppStart() {
 	_info "Starting ${APP_TITLE}..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		_execute "systemctl enable ${APP_SERVICE}@${username}"
-		_execute "systemctl start ${APP_SERVICE}@${username}"
-	done
+	local username
+	username=$(cut -d: -f1 /root/.admin.info)
+	_execute "systemctl enable ${APP_SERVICE}@${username}"
+	_execute "systemctl start ${APP_SERVICE}@${username}"
 	_success "${APP_TITLE} started."
 }
 

@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -506,8 +506,7 @@ EOF
 location /${username} {
 include scgi_params;
 scgi_pass unix:/var/run/${username}/.rtorrent.sock;
-auth_basic "Password Required";
-auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.${username}" "")
 }
 SCGI
 		fi
@@ -522,8 +521,7 @@ SCGI
 location /${username}.rtorrent.downloads {
   alias /home/${username}/torrents/rtorrent;
   include /etc/nginx/snippets/fancyindex.conf;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.${username}" "  ")
 
   location ~* \.php$ {
 

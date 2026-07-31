@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   JMSolo, Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -174,13 +174,12 @@ server {
 
     index index.html index.php index.htm;
 
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/$sock.sock;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+    # resolve multi-redirect
+    if (\$request_uri ~ "^[^?]*?//") {
+    rewrite "^" \$scheme://\$host\$uri permanent;
     }
 
-    include /etc/nginx/apps/*;
+    include /etc/nginx/apps/*.conf;
 
     location ~ /\.ht {
         deny all;

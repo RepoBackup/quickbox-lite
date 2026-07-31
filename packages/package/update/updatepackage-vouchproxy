@@ -1,0 +1,165 @@
+#!/bin/bash
+#
+# [QuickBox Lite Vouch Proxy Updater]
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+set -euo pipefail
+
+_norm=$(tput sgr0)
+_red=$(tput setaf 1)
+_green=$(tput setaf 2)
+_cyan=$(tput setaf 6)
+
+_execute() { ($1 >>"${OUTTO}" 2>&1); }
+_info() { printf "${_cyan}➜ %s${_norm}\n" "$@"; printf ">> Info: %s\n" "$@" >>"${OUTTO}"; }
+_success() { printf "${_green}✓ %s${_norm}\n" "$@"; printf ">> Success: %s\n" "$@" >>"${OUTTO}"; }
+_error() { printf "${_red}✗ %s${_norm}\n" "$@"; printf ">> Error: %s\n" "$@" >>"${OUTTO}"; }
+
+APP_TITLE="Vouch Proxy"
+APP_NAME="vouchproxy"
+APP_SERVICE="vouch-proxy"
+APP_LOCK=.${APP_NAME}.lock
+OUTTO=/srv/dashboard/db/output.log
+
+_usage() {
+  echo -e "\nQuickBox Lite ${APP_TITLE} Updater"
+  echo -e "\nUsage:\n$(basename "$0") [-l logfile]"
+}
+
+if ! ARGS=$(getopt -a -o hl: -l help,log: -- "$@"); then
+  _usage
+  exit 1
+fi
+
+# shellcheck disable=SC2086
+set -- $ARGS
+while true; do
+  case "$1" in
+    -h|--help)
+      _usage
+      exit 0
+      ;;
+    -l|--log)
+      OUTTO="$2"
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+  esac
+  shift
+done
+
+if [[ ! -f "/install/$APP_LOCK" ]]; then
+  _error "${APP_TITLE} hasn't been installed."
+  exit 1
+fi
+
+if [[ -f "/install/.install.lock" ]]; then
+  _error "Another install process is active."
+  exit 1
+fi
+
+echo "${APP_TITLE}" >/install/.install.lock
+
+_info "Updating ${APP_TITLE} image and restarting service..."
+_execute "docker compose -f /opt/vouch-proxy/docker-compose.yml pull"
+
+if [[ -f "/opt/vouch-proxy/config.yml" ]] && ! grep -q "post_logout_redirect_uris:" /opt/vouch-proxy/config.yml; then
+  _info "Patching Vouch config with post-logout redirect allowlist..."
+  python3 - <<'PYEOF'
+from pathlib import Path
+import re
+
+path = Path('/opt/vouch-proxy/config.yml')
+text = path.read_text()
+
+login_domain = None
+match = re.search(r"^\s*callback_url:\s*'?https://([^/'\s]+)", text, re.M)
+if match:
+  login_domain = match.group(1).strip()
+
+insert_lines = "\n  post_logout_redirect_uris:\n    - /\n"
+if login_domain:
+  insert_lines += f"    - https://{login_domain}/\n"
+
+if 'post_logout_redirect_uris:' not in text:
+  text = text.replace('oauth:\n', insert_lines + 'oauth:\n', 1)
+  path.write_text(text)
+PYEOF
+fi
+
+if [[ -f "/opt/vouch-proxy/config.yml" ]]; then
+  _info "Ensuring end_session_endpoint is allowed in post-logout redirects..."
+  python3 - <<'PYEOF'
+from pathlib import Path
+import re
+
+path = Path('/opt/vouch-proxy/config.yml')
+text = path.read_text()
+
+end_session = None
+match = re.search(r"^\s*end_session_endpoint:\s*['\"]?([^'\"\n]+)['\"]?\s*$", text, re.M)
+if match:
+  end_session = match.group(1).strip()
+
+if end_session and 'post_logout_redirect_uris:' in text and end_session not in text:
+  lines = text.splitlines()
+  out = []
+  in_post_logout = False
+  inserted = False
+  for line in lines:
+    if re.match(r'^\s*post_logout_redirect_uris:\s*$', line):
+      in_post_logout = True
+      out.append(line)
+      continue
+
+    if in_post_logout and re.match(r'^\s*[A-Za-z0-9_]+\s*:\s*', line):
+      if not inserted:
+        out.append(f'    - {end_session}')
+        inserted = True
+      in_post_logout = False
+
+    out.append(line)
+
+  if in_post_logout and not inserted:
+    out.append(f'    - {end_session}')
+  text = '\n'.join(out) + ('\n' if text.endswith('\n') else '')
+  path.write_text(text)
+PYEOF
+fi
+
+_execute "systemctl restart ${APP_SERVICE}"
+
+if [[ -f "/etc/nginx/apps/vouchproxy-auth.conf" ]] && ! grep -q "location = /logout" /etc/nginx/apps/vouchproxy-auth.conf; then
+  _info "Patching nginx vouch auth route for logout..."
+  python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path('/etc/nginx/apps/vouchproxy-auth.conf')
+content = path.read_text()
+
+insert = '''location = /logout {
+  proxy_pass http://127.0.0.1:9090/logout$is_args$args;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+}
+
+'''
+
+marker = 'location = /auth/vouch/callback {'
+if marker in content and 'location = /logout' not in content:
+    content = content.replace(marker, insert + marker, 1)
+    path.write_text(content)
+PYEOF
+fi
+
+_execute "/usr/local/bin/quickbox/system/auxiliary/qbAuthMigrate --provider vouch --migrate"
+_execute "nginx -t"
+_execute "nginx -s reload"
+
+rm -f /install/.install.lock
+_success "${APP_TITLE} updated."

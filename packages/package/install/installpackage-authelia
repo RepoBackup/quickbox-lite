@@ -1,0 +1,597 @@
+#!/bin/bash
+#
+# [QuickBox Lite Authelia Installer]
+#
+# GitHub:   https://github.com/amefs/quickbox-lite
+# Author:   Amefs
+# Current version:  v1.6.1
+# URL:
+# Original Repo:    https://github.com/QuickBox/QB
+# Credits to:       QuickBox.io
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#################################################################################
+################################################################################
+# HELP FUNCTIONS
+################################################################################
+
+set -euo pipefail
+
+_norm=$(tput sgr0)
+_red=$(tput setaf 1)
+_green=$(tput setaf 2)
+_tan=$(tput setaf 3)
+_cyan=$(tput setaf 6)
+
+_execute() { ($1 >>"${OUTTO}" 2>&1); }
+_print() { printf "${_norm}%s${_norm}\n" "$@"; printf "%s\n" "$@" >>"${OUTTO}"; }
+_info() { printf "${_cyan}➜ %s${_norm}\n" "$@"; printf ">> Info: %s\n" "$@" >>"${OUTTO}"; }
+_success() { printf "${_green}✓ %s${_norm}\n" "$@"; printf ">> Success: %s\n" "$@" >>"${OUTTO}"; }
+_warning() { printf "${_tan}⚠ %s${_norm}\n" "$@"; printf ">> Warning: %s\n" "$@" >>"${OUTTO}"; }
+_error() { printf "${_red}✗ %s${_norm}\n" "$@"; printf ">> Error: %s\n" "$@" >>"${OUTTO}"; }
+
+APP_TITLE="Authelia"
+APP_NAME="authelia"
+APP_SERVICE="authelia"
+APP_LOCK=.${APP_NAME}.lock
+OUTTO=/srv/dashboard/db/output.log
+LOGIN_DOMAIN=""
+AUTH_MODE=""
+ADMIN_EMAIL=""
+SMTP_HOST=""
+SMTP_PORT="587"
+SMTP_USERNAME=""
+SMTP_PASSWORD=""
+SMTP_SENDER=""
+
+################################################################################
+# SCRIPT FUNCTIONS
+################################################################################
+
+_usage() {
+  echo -e "\nQuickBox Lite ${APP_TITLE} Installer"
+  echo -e "\nUsage:\n$(basename "$0") [-l logfile] --domain DOMAIN"
+  echo -e "\nOptions:\n"
+  echo "-l, --log <logfile>          specific log file"
+  echo "--domain <domain>            external login domain (required)"
+  echo "--auth-mode <mode>           auth mode: password, mfa, or passwordless"
+  echo "--password                   shortcut for --auth-mode password"
+  echo "--mfa                        shortcut for --auth-mode mfa"
+  echo "--passwordless               shortcut for --auth-mode passwordless"
+  echo "--admin-email <email>        admin email (required for passwordless)"
+  echo "--smtp-host <host>           smtp host (required for passwordless)"
+  echo "--smtp-port <port>           smtp port (default: 587)"
+  echo "--smtp-username <user>       smtp username (required for passwordless)"
+  echo "--smtp-password <pass>       smtp password (required for passwordless)"
+  echo "--smtp-sender <email>        smtp sender email (required for passwordless)"
+  echo "-h, --help                   display this help and exit"
+}
+
+_lockCheck() {
+  if [[ ! -f /install/.docker.lock ]]; then
+    bash /usr/local/bin/quickbox/package/install/installpackage-docker -l "$OUTTO"
+  fi
+
+  if [[ -f "/install/.install.lock" ]]; then
+    prevApp=$(cat /install/.install.lock)
+    _error "$prevApp process running."
+    exit 1
+  fi
+
+  if [[ -f "/install/$APP_LOCK" ]]; then
+    _error "${APP_TITLE} already installed!"
+    exit 1
+  fi
+
+  if [[ -f "/install/.vouchproxy.lock" ]]; then
+    _error "Vouch Proxy is already installed. Remove Vouch Proxy before installing ${APP_TITLE}."
+    exit 1
+  fi
+}
+
+_setLock() { echo "${APP_TITLE}" >/install/.install.lock; }
+_clearInstallLock() {
+  if [[ -f /install/.install.lock ]] && [[ "$(cat /install/.install.lock)" == "${APP_TITLE}" ]]; then
+    rm -f /install/.install.lock
+  fi
+}
+_lockCleanup() {
+  echo "$APP_TITLE Install Complete!" >>"${OUTTO}" 2>&1
+  _clearInstallLock
+}
+_validationExit() {
+  _clearInstallLock
+  exit 1
+}
+
+_validateRequired() {
+  local normalized_domain
+  if [[ -z "$LOGIN_DOMAIN" ]]; then
+    _error "Missing required --domain argument."
+    _usage
+    _validationExit
+  fi
+
+  normalized_domain="${LOGIN_DOMAIN#http://}"
+  normalized_domain="${normalized_domain#https://}"
+  normalized_domain="${normalized_domain%%/*}"
+  normalized_domain="$(echo "$normalized_domain" | xargs)"
+
+  if [[ -z "$normalized_domain" ]]; then
+    _error "Invalid --domain value."
+    _validationExit
+  fi
+
+  if [[ "$normalized_domain" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    _error "Authelia login domain cannot be a raw IP address."
+    _validationExit
+  fi
+
+  if [[ -z "$AUTH_MODE" ]]; then
+    AUTH_MODE="password"
+  fi
+
+  AUTH_MODE="$(echo "$AUTH_MODE" | sed 's/[[:space:]]//g')"
+  AUTH_MODE="${AUTH_MODE%$'\r'}"
+  AUTH_MODE="${AUTH_MODE#\"}"
+  AUTH_MODE="${AUTH_MODE%\"}"
+  AUTH_MODE="${AUTH_MODE#\'}"
+  AUTH_MODE="${AUTH_MODE%\'}"
+  AUTH_MODE="$(echo "$AUTH_MODE" | tr '[:upper:]' '[:lower:]' | tr '_' '-')"
+
+  # Normalize optional SMTP/email values to avoid false validation errors from wrappers.
+  ADMIN_EMAIL="$(echo "$ADMIN_EMAIL" | xargs 2>/dev/null || true)"
+  SMTP_HOST="$(echo "$SMTP_HOST" | xargs 2>/dev/null || true)"
+  SMTP_PORT="$(echo "$SMTP_PORT" | xargs 2>/dev/null || true)"
+  SMTP_USERNAME="$(echo "$SMTP_USERNAME" | xargs 2>/dev/null || true)"
+  SMTP_PASSWORD="${SMTP_PASSWORD%$'\r'}"
+  SMTP_SENDER="$(echo "$SMTP_SENDER" | xargs 2>/dev/null || true)"
+
+  ADMIN_EMAIL="${ADMIN_EMAIL#\"}"; ADMIN_EMAIL="${ADMIN_EMAIL%\"}"; ADMIN_EMAIL="${ADMIN_EMAIL#\'}"; ADMIN_EMAIL="${ADMIN_EMAIL%\'}"
+  SMTP_HOST="${SMTP_HOST#\"}"; SMTP_HOST="${SMTP_HOST%\"}"; SMTP_HOST="${SMTP_HOST#\'}"; SMTP_HOST="${SMTP_HOST%\'}"
+  SMTP_PORT="${SMTP_PORT#\"}"; SMTP_PORT="${SMTP_PORT%\"}"; SMTP_PORT="${SMTP_PORT#\'}"; SMTP_PORT="${SMTP_PORT%\'}"
+  SMTP_USERNAME="${SMTP_USERNAME#\"}"; SMTP_USERNAME="${SMTP_USERNAME%\"}"; SMTP_USERNAME="${SMTP_USERNAME#\'}"; SMTP_USERNAME="${SMTP_USERNAME%\'}"
+  SMTP_PASSWORD="${SMTP_PASSWORD#\"}"; SMTP_PASSWORD="${SMTP_PASSWORD%\"}"; SMTP_PASSWORD="${SMTP_PASSWORD#\'}"; SMTP_PASSWORD="${SMTP_PASSWORD%\'}"
+  SMTP_SENDER="${SMTP_SENDER#\"}"; SMTP_SENDER="${SMTP_SENDER%\"}"; SMTP_SENDER="${SMTP_SENDER#\'}"; SMTP_SENDER="${SMTP_SENDER%\'}"
+
+  if [[ -z "$SMTP_PORT" ]]; then
+    SMTP_PORT="587"
+  fi
+
+  if [[ "$AUTH_MODE" == "password-mfa" ]]; then
+    AUTH_MODE="mfa"
+  fi
+
+  if [[ "$AUTH_MODE" == "one-factor" ]]; then
+    AUTH_MODE="password"
+  fi
+
+  if [[ "$AUTH_MODE" == "passwordless" ]]; then
+    AUTH_MODE="passwordless"
+  fi
+
+  if [[ -n "$AUTH_MODE" ]] && [[ "$AUTH_MODE" != "password" ]] && [[ "$AUTH_MODE" != "mfa" ]] && [[ "$AUTH_MODE" != "passwordless" ]]; then
+    _error "Invalid --auth-mode value. Use password, mfa, or passwordless."
+    _validationExit
+  fi
+
+  # Passwordless requires full email/SMTP configuration.
+  if [[ "$AUTH_MODE" == "passwordless" ]]; then
+    if [[ -z "$ADMIN_EMAIL" || -z "$SMTP_HOST" || -z "$SMTP_USERNAME" || -z "$SMTP_PASSWORD" || -z "$SMTP_SENDER" ]]; then
+      _error "passwordless mode requires --admin-email, --smtp-host, --smtp-username, --smtp-password and --smtp-sender."
+      _validationExit
+    fi
+  fi
+
+  # If any SMTP/email option is supplied in MFA mode, require the full set.
+  if [[ "$AUTH_MODE" == "mfa" ]]; then
+    if [[ -n "$ADMIN_EMAIL$SMTP_HOST$SMTP_USERNAME$SMTP_PASSWORD$SMTP_SENDER" ]]; then
+      if [[ -z "$ADMIN_EMAIL" || -z "$SMTP_HOST" || -z "$SMTP_USERNAME" || -z "$SMTP_PASSWORD" || -z "$SMTP_SENDER" ]]; then
+        _error "When setting email in mfa mode, provide full SMTP config: --admin-email, --smtp-host, --smtp-username, --smtp-password and --smtp-sender."
+        _validationExit
+      fi
+    fi
+  fi
+
+  if [[ -n "$ADMIN_EMAIL" ]] && [[ ! "$ADMIN_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; then
+    _error "Invalid --admin-email value."
+    _validationExit
+  fi
+
+  if [[ -n "$SMTP_SENDER" ]] && [[ ! "$SMTP_SENDER" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; then
+    _error "Invalid --smtp-sender value."
+    _validationExit
+  fi
+
+  if [[ -n "$SMTP_PORT" ]] && [[ ! "$SMTP_PORT" =~ ^[0-9]+$ ]]; then
+    _error "Invalid --smtp-port value."
+    _validationExit
+  fi
+
+  LOGIN_DOMAIN="$normalized_domain"
+}
+
+_generatePasswordHash() {
+  local password="$1"
+  local digest
+
+  digest=$(
+    docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password "$password" 2>>"${OUTTO}" |
+      awk -F': ' '/^Digest: / {print $2}'
+  )
+
+  if [[ -z "$digest" ]]; then
+    _error "Failed to generate Authelia password hash."
+    exit 1
+  fi
+
+  printf "%s" "$digest"
+}
+
+_readAdminPassword() {
+  local passphrase
+  local passtext
+  local decoded
+
+  passphrase="$(cat /root/.ssh/local_user 2>/dev/null || true)"
+  passtext="$(cut -d: -f2- /root/.admin.info 2>/dev/null || true)"
+
+  if [[ -z "$passtext" ]]; then
+    return 1
+  fi
+
+  # Try the modern encrypted format first (no salt), then legacy salt format.
+  if [[ -n "$passphrase" ]]; then
+    decoded="$(printf '%s\n' "$passtext" | openssl enc -aes-128-ecb -pbkdf2 -a -d -pass "pass:${passphrase}" -nosalt 2>/dev/null || true)"
+    if [[ -n "$decoded" ]]; then
+      printf '%s' "$decoded"
+      return 0
+    fi
+
+    decoded="$(printf '%s\n' "$passtext" | openssl enc -aes-128-ecb -pbkdf2 -a -d -pass "pass:${passphrase}" 2>/dev/null || true)"
+    if [[ -n "$decoded" ]]; then
+      printf '%s' "$decoded"
+      return 0
+    fi
+  fi
+
+  # Fallback for setups where /root/.admin.info already stores plaintext.
+  printf '%s' "$passtext"
+  return 0
+}
+
+_installApp() {
+  local admin_user
+  local admin_pass
+  local admin_hash
+  local authelia_uid
+  local authelia_gid
+  local authelia_jwt_secret
+  local authelia_session_secret
+  local authelia_storage_key
+  local access_policy="one_factor"
+  local webauthn_enable_passkey_login="false"
+  local admin_email=""
+  local notifier_block=""
+  local totp_setup_link=""
+  local totp_output=""
+
+  admin_user=$(cut -d: -f1 /root/.admin.info)
+  admin_pass="$(_readAdminPassword)"
+
+  if [[ -z "$admin_user" || -z "$admin_pass" ]]; then
+    _error "Could not read admin credentials from /root/.admin.info."
+    _error "Run 'box set password' then retry installation."
+    exit 1
+  fi
+
+  _info "Preparing ${APP_TITLE} runtime..."
+  mkdir -p /opt/authelia
+  chmod 700 /opt/authelia
+
+  authelia_uid=$(id -u www-data)
+  authelia_gid=$(id -g www-data)
+
+  admin_hash="$(_generatePasswordHash "$admin_pass")"
+
+  authelia_jwt_secret="$(openssl rand -hex 32)"
+  authelia_session_secret="$(openssl rand -hex 32)"
+  authelia_storage_key="$(openssl rand -hex 32)"
+
+  if [[ -n "$ADMIN_EMAIL" ]]; then
+    admin_email="$ADMIN_EMAIL"
+  else
+    admin_email="${admin_user}@${LOGIN_DOMAIN}"
+  fi
+
+  notifier_block='notifier:
+  filesystem:
+    filename: /config/notification.txt'
+
+  if [[ "$AUTH_MODE" == "mfa" ]]; then
+    access_policy="two_factor"
+    webauthn_enable_passkey_login="true"
+    if [[ -n "$ADMIN_EMAIL$SMTP_HOST$SMTP_USERNAME$SMTP_PASSWORD$SMTP_SENDER" ]]; then
+      notifier_block=$(cat <<EOF
+notifier:
+  smtp:
+    address: "submission://${SMTP_HOST}:${SMTP_PORT}"
+    sender: "${SMTP_SENDER}"
+    username: "${SMTP_USERNAME}"
+    password: "${SMTP_PASSWORD}"
+EOF
+)
+    else
+      webauthn_enable_passkey_login="false"
+    fi
+  elif [[ "$AUTH_MODE" == "passwordless" ]]; then
+    access_policy="one_factor"
+    webauthn_enable_passkey_login="true"
+    notifier_block=$(cat <<EOF
+notifier:
+  smtp:
+    address: "submission://${SMTP_HOST}:${SMTP_PORT}"
+    sender: "${SMTP_SENDER}"
+    username: "${SMTP_USERNAME}"
+    password: "${SMTP_PASSWORD}"
+EOF
+)
+  fi
+
+  cat >/opt/authelia/users_database.yml <<EOF
+users:
+  ${admin_user}:
+    displayname: ${admin_user}
+    password: "${admin_hash}"
+    email: "${admin_email}"
+    groups:
+      - admins
+EOF
+
+  cat >/opt/authelia/configuration.yml <<EOF
+theme: auto
+
+server:
+  address: tcp://0.0.0.0:9091/authelia
+
+log:
+  level: info
+
+identity_validation:
+  reset_password:
+    jwt_secret: "${authelia_jwt_secret}"
+
+totp:
+  issuer: ${LOGIN_DOMAIN}
+
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain: ${LOGIN_DOMAIN}
+      policy: ${access_policy}
+
+webauthn:
+  disable: false
+  enable_passkey_login: ${webauthn_enable_passkey_login}
+  display_name: Authelia
+  selection_criteria:
+    user_verification: preferred
+
+session:
+  secret: "${authelia_session_secret}"
+  cookies:
+    - domain: ${LOGIN_DOMAIN}
+      authelia_url: https://${LOGIN_DOMAIN}/authelia
+      default_redirection_url: https://${LOGIN_DOMAIN}/
+      expiration: 6h
+      inactivity: 30m
+
+storage:
+  encryption_key: "${authelia_storage_key}"
+  local:
+    path: /config/db.sqlite3
+
+${notifier_block}
+EOF
+
+  cat >/opt/authelia/docker-compose.yml <<EOF
+services:
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    user: "${authelia_uid}:${authelia_gid}"
+    ports:
+      - "127.0.0.1:9091:9091"
+    restart: unless-stopped
+    volumes:
+      - /opt/authelia:/config
+EOF
+
+  chown -R www-data:www-data /opt/authelia
+  chmod 750 /opt/authelia
+
+  cat >/etc/systemd/system/${APP_SERVICE}.service <<'EOF'
+[Unit]
+Description=Authelia container
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/opt/authelia
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat >/etc/nginx/apps/authelia-auth.conf <<'EOF'
+location = /authelia/authz {
+  internal;
+  proxy_pass http://127.0.0.1:9091/api/authz/auth-request;
+  proxy_pass_request_body off;
+  proxy_set_header Content-Length "";
+  proxy_set_header Connection "";
+  proxy_set_header X-Original-Method $request_method;
+  proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+  proxy_set_header X-Forwarded-Method $request_method;
+  proxy_set_header X-Forwarded-For $remote_addr;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-URI $request_uri;
+}
+
+location = /logout {
+  set $qb_logout_url $arg_url;
+  if ($qb_logout_url = "") {
+    set $qb_logout_url "/";
+  }
+  return 302 /authelia/logout?rd=$qb_logout_url;
+}
+
+location /authelia {
+  proxy_pass http://127.0.0.1:9091;
+  proxy_set_header Host $http_host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-Uri $request_uri;
+}
+EOF
+
+  cat >/etc/nginx/conf.d/authelia-user-map.conf <<EOF
+map \$auth_resp_remote_user \$qb_authelia_local_user {
+  default "";
+  "${admin_user}" "${admin_user}";
+}
+EOF
+
+  _execute "/usr/local/bin/quickbox/system/auxiliary/qbAuthMigrate --provider authelia --migrate"
+
+  _execute "systemctl daemon-reload"
+  _execute "systemctl enable ${APP_SERVICE}"
+  _execute "systemctl restart ${APP_SERVICE}"
+
+  if [[ "$AUTH_MODE" == "mfa" ]]; then
+    totp_output="$(docker compose -f /opt/authelia/docker-compose.yml exec -T authelia authelia storage user totp generate "$admin_user" 2>>"${OUTTO}" || true)"
+    if [[ "$totp_output" == *"otpauth://"* ]]; then
+      totp_setup_link="$(printf '%s\n' "$totp_output" | sed -n "s/.*URI '\\(otpauth:\/\/[^']*\\)'.*/\\1/p" | head -n1)"
+    fi
+
+    if [[ -z "$totp_setup_link" && "$totp_output" == *"otpauth://"* ]]; then
+      totp_setup_link="$(printf '%s\n' "$totp_output" | sed -n 's/.*\(otpauth:\/\/[^[:space:]]*\).*/\1/p' | head -n1)"
+    fi
+
+    if [[ -z "$totp_setup_link" ]]; then
+      _warning "Could not parse Authelia TOTP URI automatically."
+      _warning "Run manually: docker compose -f /opt/authelia/docker-compose.yml exec -T authelia authelia storage user totp generate ${admin_user}"
+      printf "%s\n" "$totp_output" >>"${OUTTO}"
+    fi
+  fi
+
+  _execute "nginx -t"
+  _execute "nginx -s reload"
+
+  if [[ "$AUTH_MODE" == "mfa" ]]; then
+    _print "Authelia MFA TOTP setup link (scan in authenticator app):"
+    _print "$totp_setup_link"
+  fi
+
+  _success "${APP_TITLE} configured."
+}
+
+_installAppLock() {
+  _info "Configuring ${APP_TITLE} lock..."
+  touch /install/${APP_LOCK}
+  _success "${APP_TITLE} lock configured."
+}
+
+#################################################################################
+# OPT GENERATOR
+#################################################################################
+
+#################################################################################
+# MAIN PROCESS
+#################################################################################
+
+if ! ARGS=$(getopt -a -o hl: -l help,log:,domain:,auth-mode:,password,mfa,passwordless,password-mfa,admin-email:,smtp-host:,smtp-port:,smtp-username:,smtp-password:,smtp-sender: -- "$@"); then
+  _usage
+  exit 1
+fi
+
+# shellcheck disable=SC2086
+eval set -- "${ARGS}"
+while true; do
+  case "$1" in
+    -h|--help)
+      _usage
+      exit 0
+      ;;
+    -l|--log)
+      OUTTO="$2"
+      shift
+      ;;
+    --domain)
+      LOGIN_DOMAIN="$2"
+      shift
+      ;;
+    --auth-mode)
+      AUTH_MODE="$2"
+      shift
+      ;;
+    --admin-email)
+      ADMIN_EMAIL="$2"
+      shift
+      ;;
+    --smtp-host)
+      SMTP_HOST="$2"
+      shift
+      ;;
+    --smtp-port)
+      SMTP_PORT="$2"
+      shift
+      ;;
+    --smtp-username)
+      SMTP_USERNAME="$2"
+      shift
+      ;;
+    --smtp-password)
+      SMTP_PASSWORD="$2"
+      shift
+      ;;
+    --smtp-sender)
+      SMTP_SENDER="$2"
+      shift
+      ;;
+    --password)
+      AUTH_MODE="password"
+      ;;
+    --mfa)
+      AUTH_MODE="mfa"
+      ;;
+    --password-mfa)
+      AUTH_MODE="mfa"
+      ;;
+    --passwordless)
+      AUTH_MODE="passwordless"
+      ;;
+    --)
+      shift
+      break
+      ;;
+  esac
+  shift
+done
+
+_lockCheck
+_setLock
+_validateRequired
+_installApp
+_installAppLock
+_lockCleanup

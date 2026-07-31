@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -342,8 +342,8 @@ function _configureApp() {
 		unzip trgui.zip -d /opt/trgui >>"${OUTTO}" 2>&1
 	fi
 
-	# get userlist
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
+	# single-user mode: use admin account only
+	userlist=$(cat /root/.admin.info | cut -d: -f1)
 	for username in $userlist; do
 		# get used port
 		local usedport=""
@@ -357,7 +357,7 @@ function _configureApp() {
 		done
 		echo "$PORT" >/install/$username.$APP_NAME.port
 		passphrase=$(cat /root/.ssh/local_user)
-		passtext=$(cat /root/.qbuser/${username}.info | cut -d: -f2)
+		passtext=$(cat /root/.admin.info | cut -d: -f2)
 		password=$(echo ${passtext} | openssl enc -aes-128-ecb -pbkdf2 -a -d -pass pass:"${passphrase}" -nosalt)
 
 		_info "Initializing $APP_TITLE for ${username} ... "
@@ -414,11 +414,11 @@ function _configureApp() {
     "ratio-limit": 2,
     "ratio-limit-enabled": false,
     "rename-partial-files": true,
-    "rpc-authentication-required": true,
-    "rpc-bind-address": "0.0.0.0",
+    "rpc-authentication-required": false,
+    "rpc-bind-address": "127.0.0.1",
     "rpc-enabled": true,
     "rpc-host-whitelist": "",
-    "rpc-host-whitelist-enabled": true,
+    "rpc-host-whitelist-enabled": false,
     "rpc-password": "${password}",
     "rpc-port": ${PORT},
     "rpc-url": "/transmission/",
@@ -465,8 +465,7 @@ EOF
 location /${username}.transmission.downloads {
   alias /home/${username}/torrents/transmission;
   include /etc/nginx/snippets/fancyindex.conf;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.${username};
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth plain "/etc/htpasswd.d/htpasswd.${username}" "  ")
 
   location ~* \.php$ {
 
@@ -488,15 +487,14 @@ EOF
 		fi
 	done
 
-	cat >/etc/nginx/apps/transmission.conf <<'EOF'
+	cat >/etc/nginx/apps/transmission.conf <<EOF
 location /transmission {
   return 301 /transmission/web/;
 }
 location /transmission/ {
     include /etc/nginx/snippets/proxy.conf;
-    auth_basic "Password Required";
-    auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
-    proxy_pass http://$remote_user.transmission;
+	$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth proxy "/etc/htpasswd.d/htpasswd.${username}" "    ")
+		proxy_pass http://${username}.transmission;
     proxy_pass_header X-Transmission-Session-Id;
 }
 EOF
@@ -534,7 +532,7 @@ function _installAppLock() {
 
 function _installAppStart() {
 	_info "Starting ${APP_TITLE}..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
+	userlist=$(cat /root/.admin.info | cut -d: -f1)
 	for username in $userlist; do
 		_execute "systemctl enable ${APP_SERVICE}@${username}"
 		_execute "systemctl start ${APP_SERVICE}@${username}"

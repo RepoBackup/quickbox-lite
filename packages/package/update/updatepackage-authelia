@@ -1,0 +1,186 @@
+#!/bin/bash
+#
+# [QuickBox Lite Authelia Updater]
+#
+# GitHub:   https://github.com/amefs/quickbox-lite
+# Author:   Amefs
+# Current version:  v1.6.1
+# URL:
+# Original Repo:    https://github.com/QuickBox/QB
+# Credits to:       QuickBox.io
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#################################################################################
+################################################################################
+# HELP FUNCTIONS
+################################################################################
+
+set -euo pipefail
+
+_norm=$(tput sgr0)
+_red=$(tput setaf 1)
+_green=$(tput setaf 2)
+_cyan=$(tput setaf 6)
+
+_execute() { ($1 >>"${OUTTO}" 2>&1); }
+_info() { printf "${_cyan}➜ %s${_norm}\n" "$@"; printf ">> Info: %s\n" "$@" >>"${OUTTO}"; }
+_success() { printf "${_green}✓ %s${_norm}\n" "$@"; printf ">> Success: %s\n" "$@" >>"${OUTTO}"; }
+_error() { printf "${_red}✗ %s${_norm}\n" "$@"; printf ">> Error: %s\n" "$@" >>"${OUTTO}"; }
+
+APP_TITLE="Authelia"
+APP_NAME="authelia"
+APP_SERVICE="authelia"
+APP_LOCK=.${APP_NAME}.lock
+OUTTO=/srv/dashboard/db/output.log
+
+################################################################################
+# SCRIPT FUNCTIONS
+################################################################################
+
+#################################################################################
+# MAIN PROCESS
+#################################################################################
+
+_usage() {
+  echo -e "\nQuickBox Lite ${APP_TITLE} Updater"
+  echo -e "\nUsage:\n$(basename "$0") [-l logfile]"
+}
+
+if ! ARGS=$(getopt -a -o hl: -l help,log: -- "$@"); then
+  _usage
+  exit 1
+fi
+
+# shellcheck disable=SC2086
+set -- $ARGS
+while true; do
+  case "$1" in
+    -h|--help)
+      _usage
+      exit 0
+      ;;
+    -l|--log)
+      OUTTO="$2"
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+  esac
+  shift
+done
+
+if [[ ! -f "/install/$APP_LOCK" ]]; then
+  _error "${APP_TITLE} hasn't been installed."
+  exit 1
+fi
+
+if [[ -f "/install/.install.lock" ]]; then
+  _error "Another install process is active."
+  exit 1
+fi
+
+echo "${APP_TITLE}" >/install/.install.lock
+
+_info "Updating ${APP_TITLE} image and restarting service..."
+if [[ -f "/opt/authelia/docker-compose.yml" ]]; then
+  _info "Ensuring ${APP_TITLE} compose runtime user is www-data..."
+  authelia_uid=$(id -u www-data)
+  authelia_gid=$(id -g www-data)
+  python3 - "$authelia_uid" "$authelia_gid" <<'PYEOF'
+from pathlib import Path
+import re
+import sys
+
+uid = sys.argv[1]
+gid = sys.argv[2]
+path = Path('/opt/authelia/docker-compose.yml')
+text = path.read_text()
+
+if re.search(r'^\s*user:\s*"?\d+:\d+"?\s*$', text, re.M):
+    text = re.sub(r'^\s*user:\s*"?\d+:\d+"?\s*$', f'    user: "{uid}:{gid}"', text, flags=re.M)
+else:
+    marker = '    container_name: authelia\n'
+    if marker in text:
+        text = text.replace(marker, marker + f'    user: "{uid}:{gid}"\n', 1)
+
+path.write_text(text)
+PYEOF
+  _execute "chown -R www-data:www-data /opt/authelia"
+fi
+
+if [[ -f "/opt/authelia/configuration.yml" ]]; then
+  _info "Applying ${APP_TITLE} base-path compatibility settings..."
+  python3 - <<'PYEOF'
+from pathlib import Path
+import re
+
+path = Path('/opt/authelia/configuration.yml')
+text = path.read_text()
+text = re.sub(
+    r'(?m)^(\s*address:\s*)tcp://0\.0\.0\.0:9091\s*$',
+    r'\1tcp://0.0.0.0:9091/authelia',
+    text,
+)
+path.write_text(text)
+PYEOF
+fi
+
+if [[ -f "/etc/nginx/apps/authelia-auth.conf" ]]; then
+  _info "Applying modern ${APP_TITLE} auth_request redirect flow..."
+  python3 - <<'PYEOF'
+from pathlib import Path
+import re
+
+path = Path('/etc/nginx/apps/authelia-auth.conf')
+text = path.read_text()
+
+text = re.sub(
+    r'(?ms)^location\s+@qb_authelia_signin\s*\{.*?\}\n\n?',
+    '',
+    text,
+)
+
+text = re.sub(
+  r'(?m)^\s*proxy_set_header\s+X-Forwarded-Uri\s+\$request_uri;\s*$',
+  '  proxy_set_header X-Forwarded-URI $request_uri;',
+    text,
+)
+
+if 'proxy_set_header X-Forwarded-URI $request_uri;' not in text:
+  text = text.replace(
+    '  proxy_set_header X-Forwarded-Host $host;\n',
+    '  proxy_set_header X-Forwarded-Host $host;\n  proxy_set_header X-Forwarded-URI $request_uri;\n',
+    1,
+  )
+
+if 'proxy_set_header Connection "";' not in text:
+  text = text.replace(
+      '  proxy_set_header Content-Length "";\n',
+      '  proxy_set_header Content-Length "";\n  proxy_set_header Connection "";\n',
+      1,
+  )
+
+if 'proxy_set_header X-Forwarded-Method $request_method;' not in text:
+  text = text.replace(
+      '  proxy_set_header X-Original-URL $scheme://$http_host$request_uri;\n',
+      '  proxy_set_header X-Original-URL $scheme://$http_host$request_uri;\n  proxy_set_header X-Forwarded-Method $request_method;\n',
+      1,
+  )
+
+path.write_text(text)
+PYEOF
+fi
+
+_execute "/usr/local/bin/quickbox/system/auxiliary/qbAuthMigrate --restore"
+_execute "/usr/local/bin/quickbox/system/auxiliary/qbAuthMigrate --provider authelia --migrate"
+
+_execute "docker compose -f /opt/authelia/docker-compose.yml pull"
+_execute "systemctl restart ${APP_SERVICE}"
+_execute "nginx -t"
+_execute "nginx -s reload"
+
+rm -f /install/.install.lock
+_success "${APP_TITLE} updated."

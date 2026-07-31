@@ -4,7 +4,7 @@
 #
 # GitHub:   https://github.com/amefs/quickbox-lite
 # Author:   Amefs
-# Current version:  v1.6.0
+# Current version:  v1.6.1
 # URL:
 # Original Repo:    https://github.com/QuickBox/QB
 # Credits to:       QuickBox.io
@@ -204,13 +204,13 @@ function _configureApp() {
 		UIlang=zh-cn
 	fi
 
-	# get userlist
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
+	# single-user mode: use admin account only
+	local username
+	username=$(cut -d: -f1 /root/.admin.info)
 		# get used port
 		local usedport=""
 		if (find /install/ -type f | grep -q .$APP_NAME.port); then
-			usedport=$(cat $(find /install/ -type f | grep .$APP_NAME.port))
+			usedport=$(cat "$(find /install/ -type f | grep .$APP_NAME.port)")
 		fi
 		# generate available port
 		PORT=$(shuf -i ${APP_WEB_PORT_LOW}-${APP_WEB_PORT_HIGH} -n 1)
@@ -219,7 +219,7 @@ function _configureApp() {
 		done
 		echo "$PORT" >/install/$username.$APP_NAME.port
 		passphrase=$(cat /root/.ssh/local_user)
-		passtext=$(cat /root/.qbuser/${username}.info | cut -d: -f2)
+		passtext=$(cat /root/.admin.info | cut -d: -f2)
 		password=$(echo ${passtext} | openssl enc -aes-128-ecb -pbkdf2 -a -d -pass pass:${passphrase} -nosalt)
 
 		mkdir -p /home/${username}/.config/filebrowser/
@@ -238,24 +238,22 @@ function _configureApp() {
 		chown ${username}:${username} -R /home/${username}/.config/filebrowser/
 
 		# Generate reverse proxy upstream
-		cat >/etc/nginx/conf.d/${username}.filebrowser.conf <<EOF
-upstream ${username}.filebrowser {
+		cat >/etc/nginx/conf.d/filebrowser.conf <<EOF
+upstream filebrowser {
   server 127.0.0.1:${PORT};
 }
 EOF
-	done
 
-	cat >/etc/nginx/apps/filebrowser.conf <<'EOF'
+	cat >/etc/nginx/apps/filebrowser.conf <<EOF
 location /filebrowser {
   return 301 /filebrowser/;
 }
 
 location /filebrowser/ {
   client_max_body_size 0;
-  auth_basic "Password Required";
-  auth_basic_user_file /etc/htpasswd.d/htpasswd.$remote_user;
-  rewrite ^/filebrowser/(?P<path>.*) /$path break;
-  proxy_pass http://$remote_user.filebrowser;
+$(bash /usr/local/bin/quickbox/system/auxiliary/qbNginxAuth proxy "/etc/htpasswd.d/htpasswd.${username}" "  ")
+	rewrite ^/filebrowser/(?P<path>.*) /\$path break;
+	proxy_pass http://filebrowser;
 }
 EOF
 
@@ -287,11 +285,10 @@ function _installAppLock() {
 
 function _installAppStart() {
 	_info "Starting ${APP_TITLE}..."
-	userlist=$(cat $(find /root/.qbuser/ -type f) | cut -d: -f1)
-	for username in $userlist; do
-		_execute "systemctl enable ${APP_SERVICE}@${username}"
-		_execute "systemctl start ${APP_SERVICE}@${username}"
-	done
+	local username
+	username=$(cut -d: -f1 /root/.admin.info)
+	_execute "systemctl enable ${APP_SERVICE}@${username}"
+	_execute "systemctl start ${APP_SERVICE}@${username}"
 	_success "${APP_TITLE} started."
 }
 

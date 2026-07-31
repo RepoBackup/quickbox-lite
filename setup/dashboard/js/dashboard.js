@@ -66,6 +66,7 @@
   }
 
   let serviceStatusItems = [
+    { service: "authelia", id: "#appstat_authelia" },
     { service: "resilio-sync", id: "#appstat_resilio-sync" },
     { service: "smbd", id: "#appstat_smbd" },
     { service: "deluged", id: "#appstat_deluged" },
@@ -94,6 +95,7 @@
     { service: "qbittorrent-clientblocker", id: "#appstat_qbittorrent-clientblocker" },
     { service: "webdav", id: "#appstat_webdav" },
     { service: "vsftpd", id: "#appstat_vsftpd" },
+    { service: "vouch-proxy", id: "#appstat_vouch-proxy" },
     { service: "ttyd", id: "#appstat_ttyd" },
     { service: "x2go", id: "#appstat_x2go" },
     { service: "znc", id: "#appstat_znc" }
